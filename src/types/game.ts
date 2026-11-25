@@ -38,6 +38,8 @@ export interface MissionProgress {
   completedAt: string | null;
 }
 
+export type FontScaleMode = 'md' | 'lg' | 'xl';
+
 export interface StudentProfile {
   nickname: string;
   onboarded: boolean;
@@ -47,7 +49,12 @@ export interface StudentProfile {
   freeExploreMode: boolean;
   reducedMotion: boolean;
   soundEnabled: boolean;
+  fontScale?: FontScaleMode;
   lastActiveQuestionId: string | null;
+  dailyGoalTarget?: number;
+  attendanceDates?: string[]; // YYYY-MM-DD dates of active study
+  bookmarkedIds?: string[]; // Question IDs marked for review/questions
+  equippedGearId?: string; // Fox detective gear customization
 }
 
 export interface DailyQuestState {

@@ -3,32 +3,39 @@ import {
   ArrowLeft,
   ArrowRight,
   Award,
+  Bookmark,
   BookOpen,
   Check,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Columns2,
   FileImage,
   Flame,
   HelpCircle,
   Lightbulb,
-  Lock,
+  Maximize2,
   Play,
   RotateCcw,
   Search,
   Sparkles,
   Star,
+  Volume2,
+  VolumeX,
   X,
 } from 'lucide-react';
 import { ExtractedQuestion } from '../types/question';
 import { LearningStage, MascotMood, MissionProgress } from '../types/game';
-import { STAGE_META } from '../utils/gameStorage';
+import { formatItemNumber, STAGE_META } from '../utils/gameStorage';
+import { isTtsSupported, speakEnglish } from '../utils/tts';
 import { MascotWidget } from './MascotWidget';
 import { PngViewer } from './PngViewer';
 import { FlowBuilderPanel } from './FlowBuilderPanel';
 import { SentenceChunkWorkshop } from './SentenceChunkWorkshop';
 import { KeyFocusWordCards } from './KeyFocusWordCards';
 import { FoxFireworksCelebration } from './FoxFireworksCelebration';
+import { BeginnerHintModal } from './BeginnerHintModal';
 import { SENTENCE_ANALYSIS_BY_ID } from '../data/sentenceAnalyses';
 import {
   getQuestionLabDraft,
@@ -38,12 +45,16 @@ import {
   SentenceLabStore,
 } from '../controllers/SentenceLabStorage';
 import discoveryMuseumImg from '../assets/images/discovery_museum_badge_1795522643337.jpg';
+import mascotImage from '../assets/images/mascot_fox_detective_1795522642644.jpg';
 
 interface DetectiveWorkspaceProps {
   question: ExtractedQuestion;
   allQuestions: ExtractedQuestion[];
   progress: MissionProgress;
+  progressById?: Record<string, MissionProgress>;
   totalXp: number;
+  level?: number;
+  equippedGearId?: string;
   currentStreak: number;
   reducedMotion: boolean;
   nickname: string;
@@ -67,7 +78,16 @@ interface DetectiveWorkspaceProps {
   };
   onGoNextMission: () => void;
   hasNextMission: boolean;
+  nextMissionLabel?: string;
+  onSelectQuestion?: (questionId: string) => void;
+  isBookmarked?: boolean;
+  onToggleBookmark?: () => void;
+  masterMuted?: boolean;
+  onToggleMute?: () => void;
+  dailyQuestBonusXp?: number;
+  onClearCelebrationMeta?: () => void;
   onOpenReview?: () => void;
+  onOpenTutorial?: () => void;
   newlyUnlockedBadgeTitles: string[];
 }
 
@@ -84,6 +104,8 @@ const FORMAT_KO: Record<ExtractedQuestion['format'], string> = {
   'long-passage-set': '긴 글 세트',
 };
 
+type WorkspacePageKey = 'clue' | 'flow' | 'sentence' | 'boss' | 'discovery';
+
 function hashSeed(str: string): number {
   let h = 2166136261;
   for (let i = 0; i < str.length; i += 1) {
@@ -93,11 +115,34 @@ function hashSeed(str: string): number {
   return Math.abs(h);
 }
 
+function getChoiceWrongHint(
+  question: ExtractedQuestion,
+  chosenIdx: number | null,
+): string {
+  const numLabel = chosenIdx ? `${chosenIdx}번 보기` : '고른 보기';
+  if (question.format === 'chart-analysis' || question.chart) {
+    return `${numLabel}의 수치·증감·비율 표현을 왼쪽 도표 막대의 숫자와 한 번 더 정확히 대조해 보세요.`;
+  }
+  if (question.format === 'notice-table' || question.table) {
+    return `${numLabel}의 날짜·시간·요금·조건 중 안내문 표와 다른 내용이 있는지 확인해 보세요.`;
+  }
+  if (question.underlinedTargets && question.underlinedTargets.length > 0) {
+    return `${numLabel}이 가리키는 대상이나 문맥상 쓰임(${question.underlinedTargets[0]})을 앞뒤 문장과 다시 연결해 보세요.`;
+  }
+  if (question.structureOutline.length >= 2) {
+    return `${numLabel}은 글의 흐름("${question.structureOutline[0]}")과 어긋나는지 핵심 단서(${question.keyFocus})와 비교해 보세요.`;
+  }
+  return `${numLabel}이 지문의 핵심 내용(${question.keyFocus})과 맞는지 다시 확인해 보세요!`;
+}
+
 export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
   question,
   allQuestions,
   progress,
+  progressById = {},
   totalXp,
+  level = 1,
+  equippedGearId = 'gear_1',
   currentStreak,
   reducedMotion,
   nickname,
@@ -112,13 +157,26 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
   onSubmitBossAnswer,
   onGoNextMission,
   hasNextMission,
+  nextMissionLabel,
+  onSelectQuestion,
+  isBookmarked = false,
+  onToggleBookmark,
+  masterMuted = false,
+  onToggleMute,
+  dailyQuestBonusXp = 0,
+  onClearCelebrationMeta,
   onOpenReview,
+  onOpenTutorial,
   newlyUnlockedBadgeTitles,
 }) => {
+  const ttsAvailable = isTtsSupported();
   const [splitPngOpen, setSplitPngOpen] = useState(true);
+  const [examPaneSize, setExamPaneSize] = useState<'normal' | 'wide'>('wide');
   const [mobileInlinePng, setMobileInlinePng] = useState(false);
   const [pngModalOpen, setPngModalOpen] = useState(false);
+  const [beginnerHintOpen, setBeginnerHintOpen] = useState(false);
   const [showHint, setShowHint] = useState(false);
+  const [foxErr, setFoxErr] = useState(false);
 
   const [selectedBossChoice, setSelectedBossChoice] = useState<number | null>(
     progress.bossChoiceIndex,
@@ -162,6 +220,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
   );
   const [museumImgError, setMuseumImgError] = useState(false);
   const [safeReplayNotice, setSafeReplayNotice] = useState(false);
+  const [stage1SubPage, setStage1SubPage] = useState<'flow' | 'sentence'>('flow');
   const [foxCelebration, setFoxCelebration] = useState<{
     xpDelta: number;
     earnedStars: 0 | 1 | 2 | 3;
@@ -190,6 +249,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
 
   useEffect(() => {
     setShowHint(false);
+    setBeginnerHintOpen(false);
     setSelectedBossChoice(progress.bossChoiceIndex);
     setHadWrongThisVisit(false);
     setBossFeedback(
@@ -207,8 +267,15 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
     setTimerActive(false);
     setSecondsLeft(90);
     setSafeReplayNotice(false);
+    setStage1SubPage('flow');
     setFoxCelebration(null);
   }, [question.id, progress.bossChoiceIndex, progress.isCorrect, progress.stars]);
+
+  useEffect(() => {
+    const onOpenHint = () => setBeginnerHintOpen(true);
+    window.addEventListener('rq-open-beginner-hint', onOpenHint);
+    return () => window.removeEventListener('rq-open-beginner-hint', onOpenHint);
+  }, []);
 
   // 0.5s XP Count-up only on entering Stage 3 (MY DISCOVERY)
   const rawStage = progress.currentStage;
@@ -277,7 +344,13 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
   }, [question, allQuestions]);
 
   const clueCards = useMemo(() => {
-    const cards: { key: string; kind: string; title: string; detail: string }[] = [];
+    const cards: {
+      key: string;
+      kind: string;
+      title: string;
+      detail: string;
+      audioTerm?: string;
+    }[] = [];
 
     (question.footnotes ?? []).forEach((fn, idx) => {
       cards.push({
@@ -285,6 +358,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
         kind: '각주 어휘',
         title: `* ${fn.term}`,
         detail: fn.meaning,
+        audioTerm: fn.term,
       });
     });
 
@@ -293,7 +367,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
         key: `ul-${idx}`,
         kind: '밑줄 · 지시 단서',
         title: tgt,
-        detail: '왼쪽 원본 지문에서 문맥상 역할이나 지시 대상을 확인해 보세요.',
+        detail: '원본 시험지에서 문맥상 역할이나 지시 대상을 확인해 보세요.',
       });
     });
 
@@ -307,32 +381,245 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
     return cards;
   }, [question]);
 
+  const currentQGlobalIdx = useMemo(
+    () => allQuestions.findIndex((q) => q.id === question.id),
+    [allQuestions, question.id],
+  );
+  const prevGlobalQuestion =
+    currentQGlobalIdx > 0 ? allQuestions[currentQGlobalIdx - 1] : null;
+  const nextGlobalQuestion =
+    currentQGlobalIdx >= 0 && currentQGlobalIdx < allQuestions.length - 1
+      ? allQuestions[currentQGlobalIdx + 1]
+      : null;
+
+  const sameExamQuestions = useMemo(
+    () => allQuestions.filter((q) => q.examYear === question.examYear),
+    [allQuestions, question.examYear],
+  );
+  const examPositionIndex = useMemo(() => {
+    const idx = sameExamQuestions.findIndex((q) => q.id === question.id);
+    return idx >= 0 ? idx + 1 : 1;
+  }, [sameExamQuestions, question.id]);
+  const questions2025 = useMemo(
+    () => allQuestions.filter((q) => q.examYear === '2025'),
+    [allQuestions],
+  );
+  const questions2026 = useMemo(
+    () => allQuestions.filter((q) => q.examYear === '2026'),
+    [allQuestions],
+  );
+
   const currentSentenceAnalysis = SENTENCE_ANALYSIS_BY_ID[question.id] ?? null;
 
-  // Strict sequential stage locking: Stage 0 -> Stage 1 -> Stage 2 -> Stage 3
-  const isStage0Done = progress.discoveredClues.length >= clueCards.length;
+  // Track completion for checkmarks & ★3 bonus without blocking free stage navigation
+  const isStage0Done =
+    progress.completed ||
+    clueCards.every((c) => progress.discoveredClues.includes(c.key));
   const isStage1Done =
-    question.structureOutline.length >= 3
+    progress.completed ||
+    currentLabDraft.sentenceCompleted ||
+    (question.structureOutline.length >= 3
       ? progress.storyChecked
       : progress.guessChoiceIndex !== null &&
-        Boolean(guessOptions[progress.guessChoiceIndex]?.isReal);
+        Boolean(guessOptions[progress.guessChoiceIndex]?.isReal));
   const isStage2Done = progress.completed || Boolean(bossFeedback?.isCorrect);
 
-  const maxUnlockedStage: LearningStage = !isStage0Done
-    ? 0
-    : !isStage1Done
-      ? 1
-      : !isStage2Done
-        ? 2
-        : 3;
+  const maxUnlockedStage: LearningStage = 3;
 
   const stage = Math.min(progress.currentStage, maxUnlockedStage) as LearningStage;
   const stageInfo = STAGE_META[stage];
 
+  // Ordered workbook pages (splits Stage 1 into 2 non-scrolling pages when sentence analysis exists)
+  const pagesList = useMemo(() => {
+    const list: {
+      key: WorkspacePageKey;
+      titleKo: string;
+      subtitleKo: string;
+      stage: LearningStage;
+      subPage?: 'flow' | 'sentence';
+    }[] = [
+      {
+        key: 'clue',
+        titleKo: '단어 · 단서 확인',
+        subtitleKo: '발문과 단어 카드를 눌러 핵심 단서를 먼저 열어요 (건너뛰고 바로 풀어도 돼요)',
+        stage: 0,
+      },
+      {
+        key: 'flow',
+        titleKo: '글 흐름 정리',
+        subtitleKo: '지문의 전개 순서와 핵심 흐름을 직접 맞춰봐요',
+        stage: 1,
+        subPage: 'flow',
+      },
+    ];
+    if (currentSentenceAnalysis) {
+      list.push({
+        key: 'sentence',
+        titleKo: '핵심 문장 해석',
+        subtitleKo: '핵심 영어 문장을 덩어리씩 끊어서 쉽게 해석해요',
+        stage: 1,
+        subPage: 'sentence',
+      });
+    }
+    list.push(
+      {
+        key: 'boss',
+        titleKo: '문제 풀기 (①~⑤)',
+        subtitleKo: '모은 단서와 원본 시험지를 보고 ①~⑤ 중 정답을 선택해요',
+        stage: 2,
+      },
+      {
+        key: 'discovery',
+        titleKo: '해설 · 오답 메모',
+        subtitleKo: '정답 해설을 확인하고 나만의 한 줄 메모를 남길 수 있어요',
+        stage: 3,
+      },
+    );
+    return list;
+  }, [currentSentenceAnalysis]);
+
+  const activePageKey: WorkspacePageKey =
+    stage === 0
+      ? 'clue'
+      : stage === 1
+        ? currentSentenceAnalysis && stage1SubPage === 'sentence'
+          ? 'sentence'
+          : 'flow'
+        : stage === 2
+          ? 'boss'
+          : 'discovery';
+
+  const activePageIdx = Math.max(
+    0,
+    pagesList.findIndex((p) => p.key === activePageKey),
+  );
+  const currentPageMeta = pagesList[activePageIdx];
+  const prevPage = activePageIdx > 0 ? pagesList[activePageIdx - 1] : null;
+  const nextPage =
+    activePageIdx < pagesList.length - 1 ? pagesList[activePageIdx + 1] : null;
+  const isNextPageUnlocked = Boolean(nextPage);
+
+  // Duolingo-style live green progress bar percentage across pages
+  const lessonProgressPct = useMemo(() => {
+    if (stage === 3) return 100;
+    if (stage === 2) return bossFeedback?.isCorrect ? 94 : 78;
+    if (stage === 1) {
+      if (activePageKey === 'sentence') return isStage1Done ? 70 : 58;
+      return isStage1Done ? 62 : 44;
+    }
+    const clueRatio =
+      clueCards.length > 0
+        ? progress.discoveredClues.length / clueCards.length
+        : 1;
+    return Math.round(12 + clueRatio * 20);
+  }, [
+    stage,
+    activePageKey,
+    bossFeedback?.isCorrect,
+    isStage1Done,
+    clueCards.length,
+    progress.discoveredClues.length,
+  ]);
+
+  // Page-turn motion graphics direction tracking across ALL pages (StrictMode-safe)
+  const stageCardRef = useRef<HTMLElement | null>(null);
+  const lastPageSnapshotRef = useRef<{
+    qId: string;
+    pageIdx: number;
+    dir: 'next' | 'prev' | 'none';
+  }>({
+    qId: question.id,
+    pageIdx: activePageIdx,
+    dir: 'none',
+  });
+
+  let pageTurnDir: 'next' | 'prev' | 'none' = lastPageSnapshotRef.current.dir;
+  if (lastPageSnapshotRef.current.qId !== question.id) {
+    pageTurnDir = 'none';
+  } else if (lastPageSnapshotRef.current.pageIdx !== activePageIdx) {
+    pageTurnDir =
+      activePageIdx > lastPageSnapshotRef.current.pageIdx ? 'next' : 'prev';
+  }
+
+  useEffect(() => {
+    const prevQ = lastPageSnapshotRef.current.qId;
+    const prevP = lastPageSnapshotRef.current.pageIdx;
+    lastPageSnapshotRef.current = {
+      qId: question.id,
+      pageIdx: activePageIdx,
+      dir: pageTurnDir,
+    };
+    if (prevQ === question.id && prevP !== activePageIdx) {
+      stageCardRef.current?.scrollIntoView({
+        behavior: reducedMotion ? 'auto' : 'smooth',
+        block: 'start',
+      });
+    }
+  }, [question.id, activePageIdx, pageTurnDir, reducedMotion]);
+
+  const goToPageByIndex = (idx: number) => {
+    const target = pagesList[idx];
+    if (!target || target.stage > maxUnlockedStage) return;
+    if (target.subPage) {
+      setStage1SubPage(target.subPage);
+    }
+    if (target.stage !== stage) {
+      onStageChange(target.stage);
+    }
+  };
+
   const handleGuardedStageChange = (targetStage: LearningStage) => {
     if (targetStage > maxUnlockedStage) return;
+    if (targetStage === 1) {
+      if (stage === 0) setStage1SubPage('flow');
+      else if (stage >= 2 && currentSentenceAnalysis) setStage1SubPage('sentence');
+    }
     onStageChange(targetStage);
   };
+
+  // Keyboard Left/Right arrow page flip + Stage 2 shortcuts (1-5 select, Enter submit)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (pngModalOpen || beginnerHintOpen || foxCelebration) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (stage === 2 && ['1', '2', '3', '4', '5'].includes(e.key)) {
+        const num = Number(e.key);
+        if (num <= question.choices.length) {
+          e.preventDefault();
+          setSelectedBossChoice(num);
+          if (bossFeedback?.submitted && !bossFeedback.isCorrect) {
+            setBossFeedback(null);
+          }
+          return;
+        }
+      }
+      if (stage === 2 && e.key === 'Enter') {
+        if (selectedBossChoice !== null && (!bossFeedback?.submitted || !bossFeedback.isCorrect)) {
+          e.preventDefault();
+          handleBossSubmit();
+          return;
+        }
+      }
+      if (e.key === 'ArrowRight' && nextPage) {
+        e.preventDefault();
+        goToPageByIndex(activePageIdx + 1);
+      } else if (e.key === 'ArrowLeft' && prevPage) {
+        e.preventDefault();
+        goToPageByIndex(activePageIdx - 1);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
 
   const mascotMood: MascotMood = useMemo(() => {
     if (stage === 0) return 'clue';
@@ -384,42 +671,131 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
     handleGuardedStageChange(targetStage);
   };
 
+  const renderFoxPromptBubble = (
+    kicker: string,
+    bodyText: string,
+    subTargets?: string[],
+  ) => (
+    <div className="flex items-start gap-3.5 sm:gap-4">
+      <div
+        className={`w-16 h-16 sm:w-20 sm:h-20 rounded-3xl overflow-hidden border-2 shrink-0 bg-[#FFF9EF] flex items-center justify-center shadow-xs ${
+          !reducedMotion ? 'rq-fox-bob' : ''
+        } ${isLavender ? 'border-[#C6BEE8]' : 'border-[#E5E5E5]'}`}
+      >
+        {foxErr ? (
+          <Sparkles className="w-7 h-7 text-[#58CC02]" />
+        ) : (
+          <img
+            src={mascotImage}
+            alt="여우 학습 도우미"
+            onError={() => setFoxErr(true)}
+            className="w-full h-full object-cover"
+          />
+        )}
+      </div>
+
+      <div
+        className={`dq-speech-bubble ${!reducedMotion ? 'rq-speech-pop' : ''} flex-1 rounded-2xl border-2 bg-white px-5 py-4 space-y-2 ${
+          isLavender ? 'border-[#CFCBE8]' : 'border-[#E5E5E5]'
+        }`}
+      >
+        <div
+          className={`text-xs sm:text-sm font-extrabold ${
+            isLavender ? 'text-[#5E48A3]' : 'text-[#58A700]'
+          }`}
+        >
+          {kicker}
+        </div>
+        <h2
+          className={`text-lg sm:text-xl font-extrabold leading-relaxed ${
+            isLavender ? 'text-[#14132E]' : 'text-[#1E1915]'
+          }`}
+        >
+          {bodyText}
+        </h2>
+        {subTargets && subTargets.length > 0 && (
+          <div className="flex flex-wrap gap-2.5 pt-1">
+            {subTargets.map((tgt, idx) => {
+              const hasEnglish = /[A-Za-z]{2,}/.test(tgt);
+              if (hasEnglish && ttsAvailable) {
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => speakEnglish(tgt, 0.9)}
+                    title="눌러서 영어 발음 듣기"
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-sm sm:text-base font-mono font-bold underline decoration-dotted decoration-2 underline-offset-4 cursor-pointer transition-colors ${
+                      isLavender
+                        ? 'bg-[#F5F3FC] border-[#CFCBE8] text-[#3F297A] decoration-[#7963A8] hover:bg-[#EAE3FA]'
+                        : 'bg-[#F2FAFF] border-[#BAE6FD] text-[#143752] decoration-[#1CB0F6] hover:bg-[#DDF4FF]'
+                    }`}
+                  >
+                    <Volume2 className="w-3.5 h-3.5 shrink-0" />
+                    <span>{tgt}</span>
+                  </button>
+                );
+              }
+              return (
+                <span
+                  key={idx}
+                  className={`text-sm sm:text-base font-mono font-bold underline decoration-dotted decoration-2 underline-offset-4 ${
+                    isLavender
+                      ? 'text-[#3F297A] decoration-[#7963A8]'
+                      : 'text-[#143752] decoration-[#1CB0F6]'
+                  }`}
+                >
+                  {tgt}
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   const renderChartAndTable = () => (
     <>
       {question.chart && (
         <div
-          className={`rounded-2xl border-2 p-4 space-y-3 ${
+          className={`rounded-2xl border-2 p-4 sm:p-5 space-y-3 ${
             isLavender
-              ? 'border-[#89B3E8] bg-[#EAF3FD]/65'
-              : 'border-[#A9DDF5] bg-[#A9DDF5]/15'
+              ? 'border-[#89B3E8] bg-[#EAF3FD]/70'
+              : 'border-[#84D8FF] bg-[#F2FAFF]'
           }`}
         >
           <div className="flex items-baseline justify-between gap-2">
-            <h3 className="text-xs sm:text-sm font-extrabold text-[#2D2620]">
+            <h3 className="text-sm sm:text-base font-extrabold text-[#1E1915]">
               도표 자료 · {question.chart.title}
             </h3>
             {question.chart.subtitle && (
-              <span className="text-xs text-[#5C4D42]">
+              <span className="text-xs sm:text-sm font-semibold text-[#4B3F35]">
                 {question.chart.subtitle}
               </span>
             )}
           </div>
-          <div className="space-y-2">
+          <div className="space-y-2.5">
             {question.chart.data.map((row) => (
-              <div key={row.label} className="grid grid-cols-12 items-center gap-2.5">
+              <div key={row.label} className="grid grid-cols-12 items-center gap-3">
                 <div
-                  className="col-span-5 text-xs font-medium text-[#2D2620] truncate"
+                  className="col-span-5 text-sm font-bold text-[#1E1915] truncate"
                   title={row.label}
                 >
                   {row.label}
                 </div>
-                <div className={`col-span-5 h-2.5 bg-white rounded-full overflow-hidden border ${isLavender ? 'border-[#C9C2E8]' : 'border-[#EAE0D0]'}`}>
+                <div
+                  className={`col-span-5 h-3 bg-white rounded-full overflow-hidden border ${
+                    isLavender ? 'border-[#C9C2E8]' : 'border-[#E5E5E5]'
+                  }`}
+                >
                   <div
-                    className={`h-full rounded-full ${isLavender ? 'bg-[#7963A8]' : 'bg-[#9BCB83]'}`}
+                    className={`h-full rounded-full ${
+                      isLavender ? 'bg-[#7963A8]' : 'bg-[#58CC02]'
+                    }`}
                     style={{ width: `${(row.value / maxChartVal) * 100}%` }}
                   />
                 </div>
-                <div className="col-span-2 text-right font-mono text-xs font-bold text-[#2D2620] tabular-nums">
+                <div className="col-span-2 text-right font-mono text-sm font-extrabold text-[#1E1915] tabular-nums">
                   {row.value}
                   {row.unit ?? ''}
                 </div>
@@ -432,40 +808,47 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
       {question.table && (
         <div
           className={`rounded-2xl border-2 bg-white overflow-hidden ${
-            isLavender ? 'border-[#9BBCEB]' : 'border-[#A8DCC8]'
+            isLavender ? 'border-[#9BBCEB]' : 'border-[#E5E5E5]'
           }`}
         >
           <div
-            className={`px-4 py-2 border-b text-xs font-extrabold ${
+            className={`px-4 py-2.5 border-b text-sm font-extrabold ${
               isLavender
                 ? 'bg-[#EAF3FD] border-[#C9D2F0] text-[#1D2D5E]'
-                : 'bg-[#A8DCC8]/25 border-[#EAE0D0] text-[#2D2620]'
+                : 'bg-[#F7F7F7] border-[#E5E5E5] text-[#1E1915]'
             }`}
           >
             안내문 · 표 자료
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="w-full text-left border-collapse text-sm">
               <thead>
                 <tr
                   className={`border-b ${
                     isLavender
-                      ? 'bg-[#F4F3FC] border-[#D7D4EE] text-[#454278]'
-                      : 'bg-[#FFF9EF] border-[#EAE0D0] text-[#5C4D42]'
+                      ? 'bg-[#F4F3FC] border-[#D7D4EE] text-[#2F2C5C]'
+                      : 'bg-[#FAFAFA] border-[#E5E5E5] text-[#4B3F35]'
                   }`}
                 >
                   {question.table.headers.map((h) => (
-                    <th key={h} className="px-3 py-2 font-bold">
+                    <th key={h} className="px-4 py-2.5 font-extrabold">
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className={`divide-y ${isLavender ? 'divide-[#ECEAF8]' : 'divide-[#F2ECE1]'}`}>
+              <tbody
+                className={`divide-y ${
+                  isLavender ? 'divide-[#ECEAF8]' : 'divide-[#F0F0F0]'
+                }`}
+              >
                 {question.table.rows.map((r, ri) => (
                   <tr key={ri}>
                     {r.map((cell, ci) => (
-                      <td key={ci} className="px-3 py-2 text-[#2D2620] tabular-nums">
+                      <td
+                        key={ci}
+                        className="px-4 py-2.5 font-medium text-[#1E1915] tabular-nums"
+                      >
                         {cell}
                       </td>
                     ))}
@@ -481,99 +864,216 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
 
   const showSplitPane = splitPngOpen && (stage === 0 || stage === 1 || stage === 2);
 
+  const examPaneColClass =
+    examPaneSize === 'wide' ? 'lg:col-span-7' : 'lg:col-span-6';
+  const workPaneColClass = showSplitPane
+    ? examPaneSize === 'wide'
+      ? 'lg:col-span-5'
+      : 'lg:col-span-6'
+    : 'lg:col-span-8';
+
+  const stageAnimClass =
+    !reducedMotion && pageTurnDir === 'next'
+      ? 'rq-page-turn-next'
+      : !reducedMotion && pageTurnDir === 'prev'
+        ? 'rq-page-turn-prev'
+        : '';
+
   return (
     <div className="space-y-5">
-      {/* Top Progress Strip */}
+      {/* Top Question Location & Progress Header */}
       <div
-        className={`clay-card rounded-2xl p-4 space-y-3.5 ${
-          isLavender ? '!bg-[#FAF9FF] !border-[#C6BEE8]' : ''
+        className={`rounded-3xl border-2 bg-white p-4 sm:p-5 space-y-3.5 shadow-xs ${
+          isLavender ? 'border-[#C6BEE8] !bg-[#FAF9FF]' : 'border-[#E5E5E5]'
         }`}
       >
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
+        {/* Row 1 (TOP ANCHOR): Prominent Question Number + Exam Location + Quick Switcher */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b-2 border-[#EFEAE0]">
+          <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
             <button
               type="button"
               onClick={onBackToMap}
-              className={`clay-btn inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer ${
+              aria-label="전체 문제 목록으로 나가기"
+              title="전체 문제 목록으로"
+              className={`dq-btn-3d min-h-[44px] px-3 rounded-2xl border-2 inline-flex items-center gap-1.5 shrink-0 cursor-pointer text-xs sm:text-sm font-extrabold transition-colors ${
                 isLavender
-                  ? 'bg-[#EEF3FD] text-[#1D2D5E]'
-                  : 'bg-[#FFF9EF] text-[#2D2620]'
+                  ? 'bg-[#EEF3FD] border-[#C9C2E8] text-[#1D2D5E] hover:bg-[#DFE9FB]'
+                  : 'bg-white border-[#E5E5E5] text-[#4B4B4B] hover:bg-[#F7F7F7] hover:text-[#1E1915]'
               }`}
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>지도로</span>
+              <ArrowLeft className="w-4 h-4 shrink-0" />
+              <span className="hidden sm:inline">전체 문제</span>
             </button>
 
-            <div className="flex flex-wrap items-center gap-1.5 text-xs sm:text-sm min-w-0">
-              <span
-                className={`font-mono font-bold tabular-nums ${
-                  isLavender ? 'text-[#6852A3]' : 'text-[#9B785D]'
+            <div
+              className={`min-h-[48px] px-3.5 sm:px-4 py-1.5 rounded-2xl border-2 flex items-center justify-center font-mono font-extrabold text-lg sm:text-xl text-white shadow-xs shrink-0 tabular-nums ${
+                isLavender
+                  ? 'bg-[#6A52A3] border-[#523B8C]'
+                  : 'bg-[#58CC02] border-[#46A302]'
+              }`}
+            >
+              {formatItemNumber(question.originalItemNumber)}
+            </div>
+
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <span
+                  className={`text-sm sm:text-base font-extrabold ${
+                    isLavender ? 'text-[#14132E]' : 'text-[#1E1915]'
+                  }`}
+                >
+                  {question.examYear}년 3월 학력평가
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-lg text-xs font-extrabold font-mono tabular-nums border ${
+                    isLavender
+                      ? 'bg-[#EAE3FA] border-[#C9B9E8] text-[#4B3B94]'
+                      : 'bg-[#FFF6DA] border-[#E0B94B] text-[#6B4A00]'
+                  }`}
+                >
+                  {examPositionIndex} / {sameExamQuestions.length}문항
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-lg text-xs font-extrabold border tabular-nums ${
+                    question.points === 3
+                      ? 'bg-[#FFE5DD] border-[#E89B86] text-[#9A3218]'
+                      : isLavender
+                        ? 'bg-white border-[#D7D2EE] text-[#49467A]'
+                        : 'bg-[#FAFAFA] border-[#E5E5E5] text-[#5C4D42]'
+                  }`}
+                >
+                  {question.points}점 · {question.pages.map((p) => `${p}쪽`).join('–')}
+                </span>
+                {progress.completed && (
+                  <span className="px-2 py-0.5 rounded-lg text-xs font-extrabold bg-[#D7FFB8] border border-[#58CC02] text-[#1E4600] tabular-nums">
+                    ★{progress.stars} 완료
+                  </span>
+                )}
+              </div>
+              <div
+                className={`text-xs sm:text-sm font-bold mt-0.5 truncate ${
+                  isLavender ? 'text-[#5B48A3]' : 'text-[#6E5E52]'
                 }`}
               >
-                #{String(question.globalIndex).padStart(2, '0')}
-              </span>
-              <span className={isLavender ? 'text-[#B5B2DC]' : 'text-[#C8B9A6]'} aria-hidden="true">
-                ·
-              </span>
-              <span className={`font-extrabold truncate ${isLavender ? 'text-[#1D1B42]' : 'text-[#2D2620]'}`}>
-                {question.sourceExam}
-              </span>
-              <span className={isLavender ? 'text-[#B5B2DC]' : 'text-[#C8B9A6]'} aria-hidden="true">
-                ·
-              </span>
-              <span className={`font-semibold hidden sm:inline ${isLavender ? 'text-[#49467A]' : 'text-[#5C4D42]'}`}>
-                {question.sectionTitle}
-              </span>
-              <span className={`font-mono text-xs tabular-nums ${isLavender ? 'text-[#5B588C]' : 'text-[#6E5E52]'}`}>
-                ({question.pages.map((p) => `${p}p`).join('–')} · {question.points}점)
-              </span>
-              {isLavender && (
-                <span className="px-2 py-0.5 rounded-lg bg-[#E7E0FA] border border-[#9B85D1]/60 text-[11px] font-extrabold text-[#3F297A]">
-                  라벤더 섬
-                </span>
-              )}
+                {question.sectionTitle} · {FORMAT_KO[question.format]}
+              </div>
             </div>
           </div>
 
+          {/* Right: Question Switcher (Always visible!) + Bookmark + Mute + XP */}
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {(stage === 0 || stage === 1 || stage === 2) && (
-              <button
-                type="button"
-                onClick={() => setSplitPngOpen((v) => !v)}
-                className={`hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors whitespace-nowrap cursor-pointer ${
-                  splitPngOpen
-                    ? 'bg-[#A9DDF5]/45 border-[#5D9EC0] text-[#1D4861]'
-                    : isLavender
-                      ? 'bg-[#F3F1FC] border-[#C9C2E8] text-[#4C497A]'
-                      : 'bg-[#FFF9EF] border-[#EAE0D0] text-[#5C4D42]'
+            {onSelectQuestion && (
+              <div
+                className={`inline-flex items-center rounded-2xl border-2 p-1 gap-1 ${
+                  isLavender
+                    ? 'bg-[#F3F1FC] border-[#C9C2E8]'
+                    : 'bg-[#FAFAFA] border-[#E5E5E5]'
                 }`}
               >
-                <Columns2 className="w-3.5 h-3.5" />
-                <span>{splitPngOpen ? '시험지 나란히 보기' : '시험지 펼치기'}</span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => setPngModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#A9DDF5]/40 border border-[#72B8DB] text-xs font-bold text-[#1D4861] hover:bg-[#A9DDF5]/65 transition-colors whitespace-nowrap cursor-pointer lg:hidden"
-            >
-              <FileImage className="w-3.5 h-3.5" />
-              <span>원본 시험지 크게 보기</span>
-            </button>
-
-            {currentStreak >= 1 && (
-              <div className="px-2.5 py-1.5 rounded-xl bg-[#F39A83]/25 border border-[#D1684E] text-xs font-extrabold text-[#7A2D1C] font-mono tabular-nums inline-flex items-center gap-1">
-                <Flame className="w-3.5 h-3.5 text-[#C25D44]" />
-                <span>{currentStreak}연속</span>
+                <button
+                  type="button"
+                  disabled={!prevGlobalQuestion}
+                  onClick={() =>
+                    prevGlobalQuestion && onSelectQuestion(prevGlobalQuestion.id)
+                  }
+                  aria-label="이전 번호 문제"
+                  title={
+                    prevGlobalQuestion
+                      ? `이전: ${prevGlobalQuestion.examYear}년 ${formatItemNumber(prevGlobalQuestion.originalItemNumber)}`
+                      : '첫 번째 문제'
+                  }
+                  className="w-8 h-8 rounded-xl bg-white border border-[#E5E5E5] flex items-center justify-center text-[#4B4B4B] disabled:opacity-40 cursor-pointer"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <select
+                  value={question.id}
+                  onChange={(e) => onSelectQuestion(e.target.value)}
+                  aria-label="다른 문항 바로 이동"
+                  className="max-w-[150px] sm:max-w-[195px] h-8 px-1.5 text-xs sm:text-sm font-extrabold bg-transparent text-[#2D2620] focus:outline-none cursor-pointer"
+                >
+                  <optgroup label="2025년 3월 학력평가 (28문항)">
+                    {questions2025.map((q, idx) => (
+                      <option key={q.id} value={q.id}>
+                        2025 · {formatItemNumber(q.originalItemNumber)} ({idx + 1}/28) {q.sectionTitle}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="2026년 3월 학력평가 (28문항)">
+                    {questions2026.map((q, idx) => (
+                      <option key={q.id} value={q.id}>
+                        2026 · {formatItemNumber(q.originalItemNumber)} ({idx + 1}/28) {q.sectionTitle}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+                <button
+                  type="button"
+                  disabled={!nextGlobalQuestion}
+                  onClick={() =>
+                    nextGlobalQuestion && onSelectQuestion(nextGlobalQuestion.id)
+                  }
+                  aria-label="다음 번호 문제"
+                  title={
+                    nextGlobalQuestion
+                      ? `다음: ${nextGlobalQuestion.examYear}년 ${formatItemNumber(nextGlobalQuestion.originalItemNumber)}`
+                      : '마지막 문제'
+                  }
+                  className="w-8 h-8 rounded-xl bg-white border border-[#E5E5E5] flex items-center justify-center text-[#4B4B4B] disabled:opacity-40 cursor-pointer"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
               </div>
             )}
 
+            {onToggleBookmark && (
+              <button
+                type="button"
+                onClick={onToggleBookmark}
+                aria-label={isBookmarked ? '찜한 문제 해제' : '이 문제 찜하기'}
+                title={isBookmarked ? '찜 해제' : '이 문제 찜해두기'}
+                className={`dq-btn-3d min-h-[42px] px-3 py-1.5 rounded-2xl border-2 text-xs sm:text-sm font-extrabold inline-flex items-center gap-1 cursor-pointer ${
+                  isBookmarked
+                    ? 'bg-[#FFE18A] border-[#C9961A] text-[#5C3D00]'
+                    : 'bg-white border-[#E5E5E5] text-[#5C4D42] hover:border-[#FFC800]'
+                }`}
+              >
+                <Bookmark
+                  className={`w-4 h-4 ${
+                    isBookmarked ? 'fill-[#C9961A] text-[#5C3D00]' : ''
+                  }`}
+                />
+                <span className="hidden sm:inline">
+                  {isBookmarked ? '찜함' : '찜하기'}
+                </span>
+              </button>
+            )}
+
+            {onToggleMute && (
+              <button
+                type="button"
+                onClick={onToggleMute}
+                aria-label={masterMuted ? '소리 켜기' : '음소거'}
+                title={masterMuted ? '소리 켜기' : '음소거'}
+                className={`dq-btn-3d min-w-[42px] min-h-[42px] px-2.5 rounded-2xl border-2 flex items-center justify-center cursor-pointer ${
+                  masterMuted
+                    ? 'border-[#FF4B4B] bg-[#FFDFE0] text-[#9A1B1B]'
+                    : 'border-[#E5E5E5] bg-white text-[#5C4D42] hover:border-[#1CB0F6]'
+                }`}
+              >
+                {masterMuted ? (
+                  <VolumeX className="w-4 h-4" />
+                ) : (
+                  <Volume2 className="w-4 h-4" />
+                )}
+              </button>
+            )}
+
             <div
-              className={`px-3 py-1.5 rounded-xl border text-xs font-extrabold font-mono tabular-nums ${
+              className={`min-h-[42px] px-3.5 py-1.5 rounded-2xl border-2 text-sm font-extrabold font-mono tabular-nums inline-flex items-center shrink-0 ${
                 isLavender
-                  ? 'bg-[#F2F0FC] border-[#C9B9E8] text-[#231947]'
-                  : 'bg-[#FFF9EF] border-[#EAE0D0] text-[#2D2620]'
+                  ? 'bg-[#F2F0FC] border-[#C9B9E8] text-[#1D1540]'
+                  : 'bg-[#FFF9EF] border-[#E5E5E5] text-[#1E1915]'
               }`}
             >
               {totalXp} XP
@@ -581,11 +1081,205 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
           </div>
         </div>
 
-        {/* Responsive 4-Stage Stepper (strictly locked until previous stage is completed) */}
-        <div className="flex sm:grid sm:grid-cols-4 gap-2 overflow-x-auto pb-0.5">
+        {/* Row 2: Visual 28-Question Exam Position Map Strip (Instant spatial awareness) */}
+        {onSelectQuestion && sameExamQuestions.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-extrabold">
+              <span className={isLavender ? 'text-[#4B3B94]' : 'text-[#5C4D42]'}>
+                {question.examYear}년 시험지 문항 위치 ({examPositionIndex} / {sameExamQuestions.length})
+              </span>
+              <span className="text-[#777777] font-semibold">
+                번호를 누르면 바로 이동해요
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+              {sameExamQuestions.map((q) => {
+                const isCurrentItem = q.id === question.id;
+                const isDoneItem = Boolean(progressById[q.id]?.completed);
+                const shortNum = q.originalItemNumber.replace(/\s+/g, '');
+                return (
+                  <button
+                    key={q.id}
+                    type="button"
+                    onClick={() => onSelectQuestion(q.id)}
+                    title={`${q.sourceExam} · ${q.sectionTitle}`}
+                    aria-current={isCurrentItem ? 'step' : undefined}
+                    className={`min-w-[34px] h-8 px-2 rounded-xl border-2 text-xs font-mono font-extrabold shrink-0 transition-all cursor-pointer tabular-nums ${
+                      isCurrentItem
+                        ? isLavender
+                          ? 'bg-[#6A52A3] border-[#4B3680] text-white shadow-xs scale-105'
+                          : 'bg-[#58CC02] border-[#46A302] text-white shadow-xs scale-105'
+                        : isDoneItem
+                          ? isLavender
+                            ? 'bg-[#EAE3FA] border-[#B4A3DE] text-[#3B2378] hover:border-[#6A52A3]'
+                            : 'bg-[#D7FFB8] border-[#8CE051] text-[#1E4600] hover:border-[#46A302]'
+                          : isLavender
+                            ? 'bg-white border-[#DDD9EE] text-[#49467A] hover:border-[#6A52A3]'
+                            : 'bg-white border-[#E5E5E5] text-[#5C4D42] hover:border-[#1CB0F6]'
+                    }`}
+                  >
+                    {shortNum}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Row 3: Current Question Lesson Progress Bar + Streak */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-2 text-xs sm:text-sm font-extrabold">
+            <div className="flex items-center gap-2 min-w-0 truncate">
+              <span className={isLavender ? 'text-[#5E48A3]' : 'text-[#58A700]'}>
+                현재 문제 진행 · {stageInfo.code} {stageInfo.titleKo}
+              </span>
+              {currentStreak >= 1 && (
+                <>
+                  <span className="text-[#B8B8B8]" aria-hidden="true">·</span>
+                  <span className="inline-flex items-center gap-1 text-[#FF9600] shrink-0">
+                    <Flame className="w-4 h-4 fill-[#FF9600]" />
+                    <span>{currentStreak}연속 정답!</span>
+                  </span>
+                </>
+              )}
+            </div>
+            <span className="font-mono text-xs sm:text-sm text-[#777777] tabular-nums shrink-0">
+              {lessonProgressPct}%
+            </span>
+          </div>
+
+          <div
+            className={`h-3.5 rounded-full overflow-hidden relative ${
+              isLavender ? 'bg-[#E5E2F4]' : 'bg-[#E5E5E5]'
+            }`}
+            role="progressbar"
+            aria-valuenow={lessonProgressPct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <div
+              className={`h-full rounded-full transition-all duration-300 relative overflow-hidden ${
+                isLavender ? 'bg-[#7963A8]' : 'bg-[#58CC02]'
+              }`}
+              style={{ width: `${lessonProgressPct}%` }}
+            >
+              <div className="absolute inset-x-2 top-1 h-1 rounded-full bg-white/35" />
+              {!reducedMotion && (
+                <div
+                  aria-hidden="true"
+                  className="rq-progress-glint absolute inset-y-0 w-16 bg-gradient-to-r from-transparent via-white/45 to-transparent"
+                />
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Row 4: Large Side-by-Side Exam Sheet Controls + Beginner Hint Sheet + Tutorial */}
+        <div
+          className={`rounded-2xl border-2 p-3 flex flex-wrap items-center justify-between gap-2.5 ${
+            isLavender
+              ? 'bg-[#F1EFFC] border-[#D2CCE8]'
+              : 'bg-[#FAFAFA] border-[#E5E5E5]'
+          }`}
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            {(stage === 0 || stage === 1 || stage === 2) && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setSplitPngOpen((v) => !v)}
+                  className={`dq-btn-3d hidden lg:inline-flex items-center gap-2 min-h-[48px] px-5 py-2.5 rounded-2xl border-2 text-sm sm:text-base font-extrabold whitespace-nowrap cursor-pointer ${
+                    splitPngOpen
+                      ? isLavender
+                        ? 'bg-[#D6E8FC] border-[#4A80C2] text-[#102E54]'
+                        : 'bg-[#DDF4FF] border-[#1CB0F6] text-[#143752]'
+                      : isLavender
+                        ? 'bg-white border-[#C9C2E8] text-[#3B386B]'
+                        : 'bg-white border-[#E5E5E5] text-[#4B4B4B]'
+                  }`}
+                >
+                  <Columns2 className="w-5 h-5 shrink-0" />
+                  <span>
+                    {splitPngOpen
+                      ? '시험지 나란히 보기 켜짐'
+                      : '시험지와 나란히 보기 켜기'}
+                  </span>
+                </button>
+
+                {splitPngOpen && (
+                  <div
+                    className={`hidden lg:inline-flex items-center rounded-2xl border-2 p-1 gap-1 bg-white ${
+                      isLavender ? 'border-[#C6BEE8]' : 'border-[#E5E5E5]'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setExamPaneSize('normal')}
+                      className={`min-h-[38px] px-4 py-1.5 rounded-xl text-sm font-extrabold transition-colors cursor-pointer ${
+                        examPaneSize === 'normal'
+                          ? isLavender
+                            ? 'bg-[#C9B9E8] text-[#211442]'
+                            : 'bg-[#DDF4FF] text-[#143752]'
+                          : 'text-[#666666] hover:bg-[#F7F7F7]'
+                      }`}
+                    >
+                      나란히 1:1
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setExamPaneSize('wide')}
+                      className={`min-h-[38px] px-4 py-1.5 rounded-xl text-sm font-extrabold transition-colors cursor-pointer ${
+                        examPaneSize === 'wide'
+                          ? isLavender
+                            ? 'bg-[#C9B9E8] text-[#211442]'
+                            : 'bg-[#DDF4FF] text-[#143752]'
+                          : 'text-[#666666] hover:bg-[#F7F7F7]'
+                      }`}
+                    >
+                      시험지 크게 (넓게)
+                    </button>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setPngModalOpen(true)}
+                  className="dq-btn-3d inline-flex items-center gap-2 min-h-[48px] px-4 py-2.5 rounded-2xl border-2 bg-white border-[#E5E5E5] hover:border-[#1CB0F6] text-sm sm:text-base font-extrabold text-[#143752] whitespace-nowrap cursor-pointer"
+                >
+                  <Maximize2 className="w-5 h-5 shrink-0 text-[#1CB0F6]" />
+                  <span>시험지 전체 화면</span>
+                </button>
+              </>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {onOpenTutorial && (
+              <button
+                type="button"
+                onClick={onOpenTutorial}
+                className="dq-btn-3d min-h-[48px] px-4 py-2.5 rounded-2xl bg-white border-2 border-[#E5E5E5] hover:border-[#58CC02] text-[#4B4B4B] text-sm font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <HelpCircle className="w-4 h-4 text-[#58CC02]" />
+                <span>푸는 법</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setBeginnerHintOpen(true)}
+              className="dq-btn-3d min-h-[48px] px-5 py-2.5 rounded-2xl bg-[#FFE18A] border-2 border-[#D4A72C] text-[#2D2620] text-sm sm:text-base font-extrabold inline-flex items-center gap-2 cursor-pointer"
+            >
+              <BookOpen className="w-5 h-5 text-[#8A5A00] shrink-0" />
+              <span>쉬운 해석 · 단어 힌트</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Row 5: 4-Stage Stepper Pills (Free navigation across all 4 steps) */}
+        <div className="flex sm:grid sm:grid-cols-4 gap-2.5 overflow-x-auto pb-0.5">
           {STAGE_META.map((st) => {
             const isCurrent = st.index === stage;
-            const isUnlocked = st.index <= maxUnlockedStage;
             const isStepCompleted =
               (st.index === 0 && isStage0Done) ||
               (st.index === 1 && isStage1Done) ||
@@ -595,42 +1289,24 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
               <button
                 key={st.code}
                 type="button"
-                disabled={!isUnlocked}
                 onClick={() => handleGuardedStageChange(st.index)}
-                title={
-                  isUnlocked
-                    ? `${st.titleKo} 단계로 이동`
-                    : '이전 단계를 완료하면 열려요'
-                }
-                className={`min-w-[116px] sm:min-w-0 text-left px-3 py-2 rounded-xl border-2 transition-all shrink-0 ${
-                  !isUnlocked
+                title={`${st.titleKo} 단계로 이동`}
+                className={`min-w-[145px] sm:min-w-0 min-h-[52px] text-left px-4 py-2.5 rounded-2xl border-2 transition-all shrink-0 cursor-pointer ${
+                  isCurrent
                     ? isLavender
-                      ? 'bg-[#ECEAF6] border-[#D2CEE6] text-[#7A7799] opacity-75 cursor-not-allowed'
-                      : 'bg-[#F3EDE3] border-[#E2D8C8] text-[#9B8B7C] opacity-75 cursor-not-allowed'
-                    : isCurrent
-                      ? isLavender
-                        ? 'bg-[#C9B9E8] border-[#6A52A3] text-[#201442] cursor-pointer'
-                        : 'bg-[#FFE18A] border-[#C9961A] text-[#2D2620] cursor-pointer'
-                      : isStepCompleted
-                        ? isLavender
-                          ? 'bg-[#A9DDF5]/50 border-[#4A80C2] text-[#13365E] cursor-pointer'
-                          : 'bg-[#9BCB83]/30 border-[#9BCB83] text-[#264218] cursor-pointer'
-                        : isLavender
-                          ? 'bg-[#F5F7FF] border-[#CED6F2] text-[#454E78] hover:border-[#6A52A3] cursor-pointer'
-                          : 'bg-[#FFF9EF] border-[#EAE0D0] text-[#7D6E61] hover:border-[#9B785D] cursor-pointer'
+                      ? 'dq-btn-3d bg-[#EAE3FA] border-[#6A52A3] text-[#1A1038]'
+                      : 'dq-btn-3d bg-[#DDF4FF] border-[#1CB0F6] text-[#143752]'
+                    : isStepCompleted
+                      ? 'dq-btn-3d bg-[#D7FFB8] border-[#58CC02] text-[#1E4600]'
+                      : 'dq-btn-3d bg-white border-[#E5E5E5] text-[#4B4B4B] hover:border-[#1CB0F6]'
                 }`}
               >
-                <div className="flex items-center justify-between gap-1">
-                  <span className="text-[11px] sm:text-xs font-extrabold tabular-nums">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-extrabold tabular-nums">
                     0{st.index + 1} · {st.titleKo}
                   </span>
-                  {!isUnlocked ? (
-                    <Lock className={`w-3.5 h-3.5 shrink-0 ${isLavender ? 'text-[#7A7799]' : 'text-[#9B8B7C]'}`} />
-                  ) : (
-                    isStepCompleted &&
-                    !isCurrent && (
-                      <Check className={`w-3.5 h-3.5 shrink-0 ${isLavender ? 'text-[#2C5B9E]' : 'text-[#4C7A34]'}`} />
-                    )
+                  {isStepCompleted && !isCurrent && (
+                    <Check className="w-4 h-4 shrink-0 text-[#46A302]" />
                   )}
                 </div>
               </button>
@@ -639,940 +1315,1111 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
         </div>
       </div>
 
-      {/* Main Content Area */}
+      {/* Main Content Area: Exam PNG + Duolingo Lesson Card */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {showSplitPane && (
-          <div className="hidden lg:block lg:col-span-6 h-[680px] sticky top-20">
+          <div
+            className={`hidden lg:block ${examPaneColClass} h-[760px] xl:h-[820px] sticky top-6`}
+          >
             <PngViewer
               pages={question.pages}
-              targetExamLabel={`${question.sourceExam} (${question.originalItemNumber}번)`}
+              targetExamLabel={`${question.sourceExam} (${formatItemNumber(question.originalItemNumber)})`}
+              targetQuestionId={question.id}
+              islandTheme={islandTheme}
             />
           </div>
         )}
 
         <section
-          className={`${
-            showSplitPane ? 'lg:col-span-6' : 'lg:col-span-8'
-          } clay-card rounded-3xl p-5 sm:p-7 space-y-5 ${
-            isLavender ? '!bg-[#FCFBFF] !border-[#C6BEE8]' : ''
+          ref={stageCardRef}
+          className={`${workPaneColClass} rounded-3xl border-2 bg-white overflow-x-clip shadow-xs scroll-mt-24 ${
+            isLavender ? 'border-[#C6BEE8] !bg-[#FCFBFF]' : 'border-[#E5E5E5]'
           }`}
         >
+          {/* Animated Workbook Page Wrapper (Stage & Sub-Page Book Flip Motion Graphic) */}
           <div
-            className={`flex flex-wrap items-center justify-between gap-2 pb-3.5 border-b-2 ${
-              isLavender ? 'border-[#E5E2F5]' : 'border-[#F2ECE1]'
-            }`}
+            key={`${question.id}-page-${activePageKey}`}
+            className={`relative overflow-hidden ${stageAnimClass}`}
           >
-            <div>
-              <div className={`text-xs font-bold ${isLavender ? 'text-[#6852A3]' : 'text-[#9B785D]'}`}>
-                {stageInfo.code} / 4단계
-              </div>
-              <h1 className={`text-lg sm:text-xl font-extrabold mt-0.5 ${isLavender ? 'text-[#1D1B42]' : 'text-[#2D2620]'}`}>
-                {stageInfo.titleKo}
-              </h1>
-              <p className={`text-xs mt-0.5 ${isLavender ? 'text-[#524F80]' : 'text-[#6E5E52]'}`}>{stageInfo.subtitleKo}</p>
-            </div>
-            <span className={`text-xs font-bold tabular-nums ${isLavender ? 'text-[#3F538C]' : 'text-[#5C4D42]'}`}>
-              {FORMAT_KO[question.format]}
-            </span>
-          </div>
+            {!reducedMotion && pageTurnDir !== 'none' && (
+              <>
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 right-0 w-32 bg-gradient-to-l from-black/[0.08] via-white/40 to-transparent rq-page-sheen z-20"
+                />
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 left-0 w-10 bg-gradient-to-r from-black/[0.09] to-transparent rq-page-fold-shadow z-20"
+                />
+              </>
+            )}
 
-          {/* Mobile/Tablet Inline Collapsible Original Passage */}
-          {(stage === 0 || stage === 1 || stage === 2) && (
-            <div className="lg:hidden rounded-2xl border-2 border-[#A9DDF5] bg-[#A9DDF5]/15 overflow-hidden">
-              <div className="flex items-center justify-between gap-2 px-3.5 py-2.5">
-                <button
-                  type="button"
-                  onClick={() => setMobileInlinePng((v) => !v)}
-                  className="flex-1 text-left text-xs font-extrabold text-[#1D4861] inline-flex items-center gap-1.5 cursor-pointer"
-                >
-                  <FileImage className="w-4 h-4 shrink-0" />
-                  <span>
-                    {mobileInlinePng
-                      ? '원본 시험지 접기'
-                      : `원본 시험지 펼쳐보기 (${question.pages.map((p) => `${p}p`).join('–')})`}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPngModalOpen(true)}
-                  className="px-2.5 py-1 rounded-lg bg-white border border-[#72B8DB] text-[11px] font-bold text-[#1D4861] cursor-pointer"
-                >
-                  전체 화면
-                </button>
-              </div>
-              {mobileInlinePng && (
-                <div className="h-[380px] p-2 pt-0">
-                  <PngViewer
-                    pages={question.pages}
-                    targetExamLabel={`${question.sourceExam} (${question.originalItemNumber}번)`}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* STAGE 0: 단서 모으기 */}
-          {stage === 0 && (
-            <div className="space-y-5">
-              <div
-                className={`border-2 rounded-2xl p-4 sm:p-5 space-y-2 ${
-                  isLavender
-                    ? 'bg-[#F3F1FC] border-[#C9B9E8]'
-                    : 'bg-[#FFF9EF] border-[#EAE0D0]'
-                }`}
-              >
-                {question.setRangeLabel && (
-                  <p className={`text-xs font-bold ${isLavender ? 'text-[#6852A3]' : 'text-[#9B785D]'}`}>
-                    {question.setRangeLabel}
-                  </p>
-                )}
-                <h2 className={`text-base sm:text-lg font-bold leading-relaxed ${isLavender ? 'text-[#1D1B42]' : 'text-[#2D2620]'}`}>
-                  {question.prompt}
-                </h2>
-              </div>
-
-              {renderChartAndTable()}
-
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className={`text-xs sm:text-sm font-extrabold ${isLavender ? 'text-[#1D1B42]' : 'text-[#2D2620]'}`}>
-                    단서 카드를 눌러 뜻을 확인하세요 (1개당 +5 XP)
-                  </span>
-                  <span className={`text-xs font-mono font-bold tabular-nums ${isLavender ? 'text-[#6852A3]' : 'text-[#9B785D]'}`}>
-                    {progress.discoveredClues.length} / {clueCards.length}
-                  </span>
-                </div>
-
-                {safeReplayNotice && (
-                  <div className="rounded-xl bg-[#EAF5E4] border border-[#4E8336]/50 px-3.5 py-2 flex items-center justify-between gap-2 text-xs font-extrabold text-[#1A390D]">
-                    <span>
-                      기존 기록(XP · 별 ★{progress.stars} · 노트)을 유지한 채 새 연습을 시작했어요!
+            <div className="p-5 sm:p-7 space-y-6">
+              {/* Crisp Page Title + Compact Page Counter Badge */}
+              <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b-2 border-[#F0ECE4]">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`text-xs sm:text-sm font-mono font-extrabold px-2.5 py-0.5 rounded-lg border tabular-nums ${
+                        isLavender
+                          ? 'bg-[#6A52A3] border-[#523B8C] text-white'
+                          : 'bg-[#58CC02] border-[#46A302] text-white'
+                      }`}
+                    >
+                      {formatItemNumber(question.originalItemNumber)}
                     </span>
+                    <h1
+                      className={`text-xl sm:text-2xl font-extrabold ${
+                        isLavender ? 'text-[#14132E]' : 'text-[#1E1915]'
+                      }`}
+                    >
+                      {currentPageMeta.titleKo}
+                    </h1>
+                    <span
+                      className={`text-xs font-extrabold px-2.5 py-0.5 rounded-lg border tabular-nums ${
+                        isLavender
+                          ? 'bg-[#F3F1FC] border-[#C9C2E8] text-[#49467A]'
+                          : 'bg-[#FFF9EF] border-[#E5E5E5] text-[#5C4D42]'
+                      }`}
+                    >
+                      {activePageIdx + 1} / {pagesList.length} 페이지
+                    </span>
+                  </div>
+                  <p
+                    className={`text-sm mt-1 font-semibold ${
+                      isLavender ? 'text-[#49467A]' : 'text-[#6E5E52]'
+                    }`}
+                  >
+                    {currentPageMeta.subtitleKo}
+                  </p>
+                </div>
+                <span
+                  className={`text-xs sm:text-sm font-extrabold tabular-nums ${
+                    isLavender ? 'text-[#5E48A3]' : 'text-[#6E5E52]'
+                  }`}
+                >
+                  {question.sectionTitle} · {FORMAT_KO[question.format]}
+                </span>
+              </div>
+
+              {/* Mobile/Tablet Inline Collapsible Original Passage */}
+              {(stage === 0 || stage === 1 || stage === 2) && (
+                <div className="lg:hidden rounded-2xl border-2 border-[#84D8FF] bg-[#F2FAFF] overflow-hidden">
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-3">
                     <button
                       type="button"
-                      onClick={() => setSafeReplayNotice(false)}
-                      aria-label="안내 닫기"
-                      className="text-[#3A6A24] hover:text-[#1A390D] cursor-pointer"
+                      onClick={() => setMobileInlinePng((v) => !v)}
+                      className="flex-1 min-h-[44px] text-left text-sm font-extrabold text-[#143752] inline-flex items-center gap-2 cursor-pointer"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      <FileImage className="w-5 h-5 shrink-0 text-[#1CB0F6]" />
+                      <span>
+                        {mobileInlinePng
+                          ? '원본 시험지 접기'
+                          : `원본 시험지 펼쳐보기 (${question.pages.map((p) => `${p}p`).join('–')})`}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPngModalOpen(true)}
+                      className="min-h-[42px] px-4 py-2 rounded-xl bg-white border-2 border-[#84D8FF] text-sm font-extrabold text-[#143752] cursor-pointer"
+                    >
+                      전체 화면
                     </button>
                   </div>
-                )}
+                  {mobileInlinePng && (
+                    <div className="h-[460px] p-2.5 pt-0">
+                      <PngViewer
+                        pages={question.pages}
+                        targetExamLabel={`${question.sourceExam} (${formatItemNumber(question.originalItemNumber)})`}
+                        targetQuestionId={question.id}
+                        islandTheme={islandTheme}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {clueCards.map((clue) => {
-                    const isCollected = progress.discoveredClues.includes(clue.key);
-                    const isKeyFocusCard = clue.key === 'key-focus';
+              {/* STAGE 0: 단서 모으기 */}
+              {stage === 0 && (
+                <div className="space-y-5">
+                  {renderFoxPromptBubble(
+                    question.setRangeLabel || '1단계 · 발문과 핵심 단서 확인',
+                    question.prompt,
+                    question.underlinedTargets,
+                  )}
 
-                    if (isKeyFocusCard && isCollected) {
-                      return (
-                        <div
-                          key={clue.key}
-                          className={`sm:col-span-2 text-left p-4 rounded-2xl border-2 space-y-3 ${
-                            isLavender
-                              ? 'bg-[#EDE8FC] border-[#7963A8]'
-                              : 'bg-[#FFE18A]/35 border-[#D4A72C]'
-                          }`}
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <span className={`text-[11px] font-bold ${isLavender ? 'text-[#5B48A3]' : 'text-[#9B785D]'}`}>
-                                {clue.kind}
-                              </span>
-                              <span className={`text-sm font-extrabold ${isLavender ? 'text-[#1D1B42]' : 'text-[#2D2620]'}`}>
-                                · {clue.title}
-                              </span>
-                            </div>
-                            <span
-                              className={`text-[11px] font-bold inline-flex items-center gap-1 ${
-                                isLavender ? 'text-[#3B6FB6]' : 'text-[#4C7A34]'
-                              }`}
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>개별 단어 카드 열림 (눌러서 체크)</span>
-                            </span>
-                          </div>
+                  {renderChartAndTable()}
 
-                          <KeyFocusWordCards
-                            keyFocus={clue.detail}
-                            analysis={currentSentenceAnalysis}
-                            footnotes={question.footnotes}
-                            interactive
-                            islandTheme={islandTheme}
-                          />
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <button
-                        key={clue.key}
-                        type="button"
-                        onClick={() => onCollectClue(clue.key)}
-                        className={`text-left p-3.5 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
-                          isKeyFocusCard ? 'sm:col-span-2' : ''
-                        } ${
-                          isCollected
-                            ? isLavender
-                              ? 'bg-[#EAE3FA] border-[#7963A8]'
-                              : 'bg-[#FFE18A]/35 border-[#D4A72C]'
-                            : isLavender
-                              ? 'bg-[#F5F7FF] border-[#CDD6F2] hover:border-[#6A52A3]'
-                              : 'bg-[#FFF9EF] border-[#EAE0D0] hover:border-[#9B785D]'
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span
+                        className={`text-sm sm:text-base font-extrabold ${
+                          isLavender ? 'text-[#14132E]' : 'text-[#1E1915]'
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className={`text-[11px] font-bold ${isLavender ? 'text-[#5B48A3]' : 'text-[#9B785D]'}`}>
-                            {clue.kind}
-                          </span>
-                          <span
-                            className={`text-[11px] font-bold inline-flex items-center gap-1 ${
-                              isCollected
-                                ? isLavender
-                                  ? 'text-[#3B6FB6]'
-                                  : 'text-[#4C7A34]'
-                                : isLavender
-                                  ? 'text-[#5B48A3]'
-                                  : 'text-[#9B785D]'
-                            }`}
-                          >
-                            {isCollected ? (
-                              <>
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>확인 완료</span>
-                              </>
-                            ) : (
-                              <>
-                                <Search className="w-3.5 h-3.5" />
-                                <span>눌러서 보기</span>
-                              </>
-                            )}
-                          </span>
-                        </div>
-                        <div className={`text-sm font-extrabold ${isLavender ? 'text-[#1D1B42]' : 'text-[#2D2620]'}`}>
-                          {clue.title}
-                        </div>
-                        <p className={`text-xs leading-relaxed ${isLavender ? 'text-[#3F3E6E]' : 'text-[#4B3F35]'}`}>
-                          {isCollected
-                            ? clue.detail
-                            : isKeyFocusCard
-                              ? '누르면 핵심 단어와 표현이 개별 카드로 펼쳐져요!'
-                              : '카드를 누르면 뜻과 포인트가 열려요'}
-                        </p>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {isStage0Done ? (
-                <div
-                  className={`rounded-2xl border-2 p-4 flex flex-wrap items-center justify-between gap-3 ${
-                    isLavender
-                      ? 'bg-[#E6EEFD] border-[#4C78C4]'
-                      : 'bg-[#9BCB83]/20 border-[#5D8A43]'
-                  }`}
-                >
-                  <div className={`text-xs sm:text-sm font-extrabold ${isLavender ? 'text-[#152D5C]' : 'text-[#1A3110]'}`}>
-                    단서를 모두 모았어요! 이제 2단계 ‘글 흐름 보기’로 이동할 수 있어요.
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleGuardedStageChange(1)}
-                    className={`clay-btn px-4 py-2 rounded-xl text-xs font-extrabold inline-flex items-center gap-1 cursor-pointer ${
-                      isLavender
-                        ? 'bg-[#C9B9E8] text-[#211442]'
-                        : 'bg-[#A8DCC8] text-[#163B2D]'
-                    }`}
-                  >
-                    <span>2단계: 글 흐름 보기</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <div
-                  className={`rounded-2xl border px-4 py-3 text-xs font-bold ${
-                    isLavender
-                      ? 'bg-[#EFEBF9] border-[#9B85D1] text-[#3C286E]'
-                      : 'bg-[#FFF6DA]/70 border-[#E0B94B] text-[#6E4D00]'
-                  }`}
-                >
-                  위 단서 카드 {clueCards.length - progress.discoveredClues.length}개를 더 열어 확인하면 다음 단계(글 흐름 보기)가 열려요!
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* STAGE 1: 글 흐름 보기 + 초보자 문장 의미 단위 해석 */}
-          {stage === 1 && (
-            <div className="space-y-6">
-              <FlowBuilderPanel
-                question={question}
-                progress={progress}
-                draft={currentLabDraft}
-                guessOptions={guessOptions}
-                onUpdateDraft={updateCurrentLabDraft}
-                onCompleteStoryBuild={onCompleteStoryBuild}
-                onRecordGuess={onRecordGuess}
-                onGoToBoss={() => handleGuardedStageChange(2)}
-                islandTheme={islandTheme}
-              />
-
-              {currentSentenceAnalysis && (
-                <SentenceChunkWorkshop
-                  analysis={currentSentenceAnalysis}
-                  draft={currentLabDraft}
-                  onUpdateDraft={updateCurrentLabDraft}
-                  islandTheme={islandTheme}
-                  onClaimSentenceXp={() => {
-                    if (claimedXpIdsRef.current.has(question.id)) return;
-                    claimedXpIdsRef.current.add(question.id);
-                    updateCurrentLabDraft((prev) => ({
-                      ...prev,
-                      sentenceXpClaimed: true,
-                      sentenceCompleted: true,
-                    }));
-                    onCompleteSentenceLab?.();
-                  }}
-                />
-              )}
-            </div>
-          )}
-
-          {/* STAGE 2: BOSS CHALLENGE */}
-          {stage === 2 && (
-            <div className="space-y-5">
-              {/* Optional 90s Practice Timer Bar */}
-              <div
-                className={`flex flex-wrap items-center justify-between gap-2 rounded-2xl border-2 px-4 py-2.5 ${
-                  isLavender
-                    ? 'bg-[#F3F1FC] border-[#C9B9E8]'
-                    : 'bg-[#FFF9EF] border-[#EAE0D0]'
-                }`}
-              >
-                <div className={`flex items-center gap-2 text-xs font-bold ${isLavender ? 'text-[#49467A]' : 'text-[#5C4D42]'}`}>
-                  <Clock className={`w-4 h-4 ${isLavender ? 'text-[#6852A3]' : 'text-[#9B785D]'}`} />
-                  <span>실전 집중 타이머</span>
-                  <span
-                    className={`font-mono text-sm font-extrabold tabular-nums ${
-                      secondsLeft <= 15 && timerActive
-                        ? 'text-[#C25D44]'
-                        : isLavender
-                          ? 'text-[#1D1B42]'
-                          : 'text-[#2D2620]'
-                    }`}
-                  >
-                    {String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:
-                    {String(secondsLeft % 60).padStart(2, '0')}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (secondsLeft === 0) setSecondsLeft(90);
-                      setTimerActive((v) => !v);
-                    }}
-                    className={`px-2.5 py-1 rounded-lg bg-white border text-xs font-bold inline-flex items-center gap-1 cursor-pointer ${
-                      isLavender
-                        ? 'border-[#C9C2E8] text-[#1D1B42] hover:border-[#6A52A3]'
-                        : 'border-[#EAE0D0] text-[#2D2620] hover:border-[#9B785D]'
-                    }`}
-                  >
-                    <Play className="w-3 h-3" />
-                    <span>{timerActive ? '일시정지' : '시작'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTimerActive(false);
-                      setSecondsLeft(90);
-                    }}
-                    className={`px-2.5 py-1 rounded-lg bg-white border text-xs font-bold cursor-pointer ${
-                      isLavender
-                        ? 'border-[#C9C2E8] text-[#524F80] hover:text-[#1D1B42]'
-                        : 'border-[#EAE0D0] text-[#6E5E52] hover:text-[#2D2620]'
-                    }`}
-                  >
-                    타이머 리셋
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSafeRestartMission(2)}
-                    title="기존 XP, 별, 배지 기록은 그대로 두고 보기 선택만 새로 시작합니다"
-                    className={`px-2.5 py-1 rounded-lg border text-xs font-extrabold inline-flex items-center gap-1 cursor-pointer ${
-                      isLavender
-                        ? 'bg-[#D7ECFC]/70 border-[#4A80C2] text-[#13355C] hover:bg-[#D7ECFC]'
-                        : 'bg-[#A8DCC8]/35 border-[#4D9479] text-[#163B2D] hover:bg-[#A8DCC8]/60'
-                    }`}
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    <span>기록 유지 · 다시 풀기</span>
-                  </button>
-                </div>
-              </div>
-
-              <div
-                className={`rounded-2xl bg-white border-2 p-4 sm:p-5 space-y-4 ${
-                  isLavender ? 'border-[#C6BEE8]' : 'border-[#EAE0D0]'
-                }`}
-              >
-                {question.setRangeLabel && (
-                  <p className={`text-xs font-bold ${isLavender ? 'text-[#6852A3]' : 'text-[#9B785D]'}`}>
-                    {question.setRangeLabel}
-                  </p>
-                )}
-                <h2 className={`text-base sm:text-lg font-bold leading-relaxed ${isLavender ? 'text-[#1D1B42]' : 'text-[#2D2620]'}`}>
-                  {question.prompt}
-                </h2>
-
-                {renderChartAndTable()}
-
-                {question.underlinedTargets && question.underlinedTargets.length > 0 && (
-                  <div className={`pt-3 border-t ${isLavender ? 'border-[#E5E2F5]' : 'border-[#F2ECE1]'}`}>
-                    <div className={`text-xs font-bold mb-1 ${isLavender ? 'text-[#524F80]' : 'text-[#6E5E52]'}`}>
-                      밑줄 / 보기 대상
-                    </div>
-                    <div className={`flex flex-wrap gap-3 text-xs sm:text-sm font-mono ${isLavender ? 'text-[#1D1B42]' : 'text-[#2D2620]'}`}>
-                      {question.underlinedTargets.map((t, i) => (
+                        단서 카드를 눌러 뜻을 확인해 보세요 (다 안 열어도 바로 풀 수 있어요 · 1개당 +5 XP)
+                      </span>
+                      <div className="flex items-center gap-2.5">
                         <span
-                          key={i}
-                          className={`underline underline-offset-4 ${
-                            isLavender ? 'decoration-[#6A52A3]' : 'decoration-[#9B785D]'
+                          className={`text-sm font-mono font-extrabold tabular-nums ${
+                            isLavender ? 'text-[#5E48A3]' : 'text-[#58A700]'
                           }`}
                         >
-                          {t}
+                          {progress.discoveredClues.length} / {clueCards.length}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleGuardedStageChange(2)}
+                          className={`px-3 py-1 rounded-xl border text-xs font-extrabold cursor-pointer transition-colors ${
+                            isLavender
+                              ? 'bg-[#F3F1FC] border-[#C6BEE8] text-[#4B3B94] hover:bg-[#EAE3FA]'
+                              : 'bg-[#EEFFD9] border-[#58CC02] text-[#285E00] hover:bg-[#D7FFB8]'
+                          }`}
+                        >
+                          바로 문제 풀기 ▶
+                        </button>
+                      </div>
+                    </div>
+
+                    {safeReplayNotice && (
+                      <div className="rounded-2xl bg-[#D7FFB8] border-2 border-[#58CC02] px-4 py-3 flex items-center justify-between gap-2 text-sm font-extrabold text-[#1E4600]">
+                        <span>
+                          기존 기록(XP · 별 ★{progress.stars} · 노트)을 유지한 채 새 연습을 시작했어요!
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setSafeReplayNotice(false)}
+                          aria-label="안내 닫기"
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-[#1E4600] cursor-pointer"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      {clueCards.map((clue) => {
+                        const isCollected = progress.discoveredClues.includes(clue.key);
+                        const isKeyFocusCard = clue.key === 'key-focus';
+
+                        if (isKeyFocusCard && isCollected) {
+                          return (
+                            <div
+                              key={clue.key}
+                              className={`sm:col-span-2 text-left p-5 rounded-2xl border-2 space-y-3.5 ${
+                                isLavender
+                                  ? 'bg-[#EDE8FC] border-[#7963A8]'
+                                  : 'bg-[#FFF9DF] border-[#E0B94B]'
+                              }`}
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`text-xs sm:text-sm font-extrabold ${
+                                      isLavender ? 'text-[#5B48A3]' : 'text-[#8A6142]'
+                                    }`}
+                                  >
+                                    {clue.kind}
+                                  </span>
+                                  <span
+                                    className={`text-base font-extrabold ${
+                                      isLavender ? 'text-[#14132E]' : 'text-[#1E1915]'
+                                    }`}
+                                  >
+                                    · {clue.title}
+                                  </span>
+                                </div>
+                                <span
+                                  className={`text-xs sm:text-sm font-extrabold inline-flex items-center gap-1 ${
+                                    isLavender ? 'text-[#2B5FA8]' : 'text-[#46A302]'
+                                  }`}
+                                >
+                                  <CheckCircle2 className="w-4 h-4" />
+                                  <span>개별 단어 카드 열림 (눌러서 뜻 확인)</span>
+                                </span>
+                              </div>
+
+                              <KeyFocusWordCards
+                                keyFocus={clue.detail}
+                                analysis={currentSentenceAnalysis}
+                                footnotes={question.footnotes}
+                                interactive
+                                islandTheme={islandTheme}
+                                revealedCardIds={currentLabDraft.revealedFocusCardIds}
+                                onToggleCard={(cardId) =>
+                                  updateCurrentLabDraft((prev) => ({
+                                    ...prev,
+                                    revealedFocusCardIds: prev.revealedFocusCardIds.includes(cardId)
+                                      ? prev.revealedFocusCardIds
+                                      : [...prev.revealedFocusCardIds, cardId],
+                                  }))
+                                }
+                                onRevealAll={(allIds) =>
+                                  updateCurrentLabDraft((prev) => ({
+                                    ...prev,
+                                    revealedFocusCardIds: Array.from(
+                                      new Set([...prev.revealedFocusCardIds, ...allIds]),
+                                    ),
+                                  }))
+                                }
+                                miniCheckDone={currentLabDraft.focusMiniCheckDone}
+                                onCompleteMiniCheck={() =>
+                                  updateCurrentLabDraft((prev) => ({
+                                    ...prev,
+                                    focusMiniCheckDone: true,
+                                  }))
+                                }
+                              />
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <div
+                            key={clue.key}
+                            className={`relative rounded-2xl border-2 transition-all flex flex-col ${
+                              isKeyFocusCard ? 'sm:col-span-2' : ''
+                            } ${
+                              isCollected
+                                ? isLavender
+                                  ? 'bg-[#EAE3FA] border-[#7963A8]'
+                                  : 'bg-[#D7FFB8]/65 border-[#58CC02]'
+                                : isLavender
+                                  ? 'bg-white border-[#CFCBE8] hover:border-[#6A52A3]'
+                                  : 'bg-white border-[#E5E5E5] hover:border-[#1CB0F6]'
+                            }`}
+                          >
+                            {clue.audioTerm && ttsAvailable && (
+                              <button
+                                type="button"
+                                onClick={() => speakEnglish(clue.audioTerm ?? '', 0.9)}
+                                aria-label={`${clue.audioTerm} 발음 듣기`}
+                                title="영단어 발음 듣기"
+                                className="absolute top-3 right-3 z-10 min-h-[34px] px-2.5 py-1 rounded-xl bg-white border-2 border-[#E5E5E5] hover:border-[#1CB0F6] text-[#1C7CB5] inline-flex items-center gap-1 text-xs font-extrabold cursor-pointer shadow-2xs"
+                              >
+                                <Volume2 className="w-3.5 h-3.5" />
+                                <span>발음</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => onCollectClue(clue.key)}
+                              className="w-full text-left p-4 sm:p-5 min-h-[120px] cursor-pointer flex flex-col justify-between gap-2 rounded-2xl"
+                            >
+                              <div className={`flex items-center justify-between gap-2 w-full ${clue.audioTerm && ttsAvailable ? 'pr-16' : ''}`}>
+                                <span
+                                  className={`text-xs sm:text-sm font-extrabold ${
+                                    isLavender ? 'text-[#5B48A3]' : 'text-[#777777]'
+                                  }`}
+                                >
+                                  {clue.kind}
+                                </span>
+                                <span
+                                  className={`text-xs sm:text-sm font-extrabold inline-flex items-center gap-1 ${
+                                    isCollected
+                                      ? isLavender
+                                        ? 'text-[#2B5FA8]'
+                                        : 'text-[#46A302]'
+                                      : isLavender
+                                        ? 'text-[#5B48A3]'
+                                        : 'text-[#1CB0F6]'
+                                  }`}
+                                >
+                                  {isCollected ? (
+                                    <>
+                                      <CheckCircle2 className="w-4 h-4" />
+                                      <span>확인 완료</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Search className="w-4 h-4" />
+                                      <span>눌러서 열기</span>
+                                    </>
+                                  )}
+                                </span>
+                              </div>
+                              <div
+                                className={`text-base sm:text-lg font-extrabold ${
+                                  isLavender ? 'text-[#14132E]' : 'text-[#1E1915]'
+                                }`}
+                              >
+                                {clue.title}
+                              </div>
+                              <p
+                                className={`text-sm leading-relaxed ${
+                                  isLavender ? 'text-[#2E2D59]' : 'text-[#4B4B4B]'
+                                }`}
+                              >
+                                {isCollected
+                                  ? clue.detail
+                                  : isKeyFocusCard
+                                    ? '누르면 핵심 단어와 표현이 개별 카드로 펼쳐져요!'
+                                    : '카드를 누르면 뜻과 포인트가 열려요'}
+                              </p>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* STAGE 1 (SPLIT PAGES): Page A = 글 흐름 보기, Page B = 초보자 의미 단위 해석 */}
+              {stage === 1 && (
+                <div className="space-y-4">
+                  {/* Compact Sub-Page Switcher Pills when Stage 1 has Sentence Lab */}
+                  {currentSentenceAnalysis && (
+                    <div className="space-y-2.5">
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => setStage1SubPage('flow')}
+                          className={`dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl border-2 text-sm sm:text-base font-extrabold cursor-pointer flex items-center justify-center gap-2 ${
+                            activePageKey === 'flow'
+                              ? isLavender
+                                ? 'bg-[#EAE3FA] border-[#6A52A3] text-[#1A1038]'
+                                : 'bg-[#DDF4FF] border-[#1CB0F6] text-[#143752]'
+                              : 'bg-white border-[#E5E5E5] text-[#4B4B4B]'
+                          }`}
+                        >
+                          <span>2-1. 글 흐름 보기</span>
+                          {progress.storyChecked && (
+                            <CheckCircle2 className="w-4 h-4 text-[#46A302]" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setStage1SubPage('sentence')}
+                          className={`dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl border-2 text-sm sm:text-base font-extrabold cursor-pointer flex items-center justify-center gap-2 ${
+                            activePageKey === 'sentence'
+                              ? isLavender
+                                ? 'bg-[#EAE3FA] border-[#6A52A3] text-[#1A1038]'
+                                : 'bg-[#EAF5E4] border-[#58CC02] text-[#1E4600]'
+                              : 'bg-white border-[#E5E5E5] text-[#4B4B4B]'
+                          }`}
+                        >
+                          <span>2-2. 의미 단위 해석</span>
+                          {currentLabDraft.sentenceCompleted && (
+                            <CheckCircle2 className="w-4 h-4 text-[#46A302]" />
+                          )}
+                        </button>
+                      </div>
+                      <div
+                        className={`rounded-xl border px-3.5 py-2 text-xs sm:text-sm font-bold flex items-center gap-2 ${
+                          isLavender
+                            ? 'bg-[#F5F3FC] border-[#D7D2EE] text-[#49467A]'
+                            : 'bg-[#FFFDF4] border-[#EDE0B8] text-[#6B5000]'
+                        }`}
+                      >
+                        <Sparkles className="w-4 h-4 shrink-0" />
+                        <span>
+                          2-1(글 흐름 정리)와 2-2(핵심 문장 해석) 중 필요한 것만 살펴보고 3단계 문제 풀기로 넘어가세요!
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {activePageKey === 'flow' && (
+                    <FlowBuilderPanel
+                      key={`flow-${question.id}`}
+                      question={question}
+                      progress={progress}
+                      draft={currentLabDraft}
+                      guessOptions={guessOptions}
+                      onUpdateDraft={updateCurrentLabDraft}
+                      onCompleteStoryBuild={onCompleteStoryBuild}
+                      onRecordGuess={onRecordGuess}
+                      onGoToBoss={() =>
+                        currentSentenceAnalysis
+                          ? setStage1SubPage('sentence')
+                          : handleGuardedStageChange(2)
+                      }
+                      nextStepLabel={
+                        currentSentenceAnalysis
+                          ? '다음: 핵심 문장 해석하기'
+                          : '다음: 문제 풀고 답 고르기'
+                      }
+                      onSkipToBoss={() => handleGuardedStageChange(2)}
+                      islandTheme={islandTheme}
+                    />
+                  )}
+
+                  {activePageKey === 'sentence' && currentSentenceAnalysis && (
+                    <SentenceChunkWorkshop
+                      key={`lab-${question.id}`}
+                      analysis={currentSentenceAnalysis}
+                      draft={currentLabDraft}
+                      onUpdateDraft={updateCurrentLabDraft}
+                      onGoToBoss={() => handleGuardedStageChange(2)}
+                      islandTheme={islandTheme}
+                      onClaimSentenceXp={() => {
+                        if (claimedXpIdsRef.current.has(question.id)) return;
+                        claimedXpIdsRef.current.add(question.id);
+                        updateCurrentLabDraft((prev) => ({
+                          ...prev,
+                          sentenceXpClaimed: true,
+                          sentenceCompleted: true,
+                        }));
+                        onCompleteSentenceLab?.();
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+
+              {/* STAGE 2: 정답 고르기 (Duolingo Multiple-Choice Layout) */}
+              {stage === 2 && (
+                <div className="space-y-5">
+                  {/* Optional 90s Practice Timer + Safe Replay Bar */}
+                  <div
+                    className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 px-4 py-3 ${
+                      isLavender
+                        ? 'bg-[#F3F1FC] border-[#C9B9E8]'
+                        : 'bg-[#FAFAFA] border-[#E5E5E5]'
+                    }`}
+                  >
+                    <div
+                      className={`flex items-center gap-2 text-sm font-extrabold ${
+                        isLavender ? 'text-[#3B386B]' : 'text-[#4B4B4B]'
+                      }`}
+                    >
+                      <Clock
+                        className={`w-5 h-5 ${
+                          isLavender ? 'text-[#5E48A3]' : 'text-[#1CB0F6]'
+                        }`}
+                      />
+                      <span>실전 집중 타이머</span>
+                      <span
+                        className={`font-mono text-base font-extrabold tabular-nums ${
+                          secondsLeft <= 15 && timerActive
+                            ? 'text-[#EA2B2B]'
+                            : isLavender
+                              ? 'text-[#14132E]'
+                              : 'text-[#1E1915]'
+                        }`}
+                      >
+                        {String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:
+                        {String(secondsLeft % 60).padStart(2, '0')}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (secondsLeft === 0) setSecondsLeft(90);
+                          setTimerActive((v) => !v);
+                        }}
+                        className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-white border-2 border-[#E5E5E5] hover:border-[#1CB0F6] text-sm font-extrabold text-[#1E1915] inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Play className="w-4 h-4" />
+                        <span>{timerActive ? '일시정지' : '시작'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTimerActive(false);
+                          setSecondsLeft(90);
+                        }}
+                        className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-white border-2 border-[#E5E5E5] text-sm font-bold text-[#666666] hover:text-[#1E1915] cursor-pointer"
+                      >
+                        리셋
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSafeRestartMission(2)}
+                        title="기존 XP, 별, 배지 기록은 그대로 두고 보기 선택만 새로 시작합니다"
+                        className="min-h-[40px] px-4 py-1.5 rounded-xl border-2 bg-[#DDF4FF] border-[#84D8FF] text-sm font-extrabold text-[#143752] inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                        <span>기록 유지 · 다시 풀기</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Mascot + Speech Bubble Question Prompt */}
+                  {renderFoxPromptBubble(
+                    question.setRangeLabel || '정답을 선택해 주세요',
+                    question.prompt,
+                    question.underlinedTargets,
+                  )}
+
+                  {renderChartAndTable()}
+
+                  {question.footnotes && question.footnotes.length > 0 && (
+                    <div
+                      className={`rounded-2xl border-2 px-4 py-3 flex flex-wrap gap-x-5 gap-y-1.5 text-sm ${
+                        isLavender
+                          ? 'bg-[#F5F3FC] border-[#D7D2EE] text-[#2F2C5C]'
+                          : 'bg-[#FAFAFA] border-[#E5E5E5] text-[#4B4B4B]'
+                      }`}
+                    >
+                      {question.footnotes.map((fn) => (
+                        <span key={fn.term}>
+                          <strong className="font-mono text-[#1E1915]">
+                            *{fn.term}
+                          </strong>
+                          : {fn.meaning}
                         </span>
                       ))}
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {question.footnotes && question.footnotes.length > 0 && (
-                  <div
-                    className={`pt-3 border-t flex flex-wrap gap-x-4 gap-y-1 text-xs ${
-                      isLavender
-                        ? 'border-[#E5E2F5] text-[#49467A]'
-                        : 'border-[#F2ECE1] text-[#5C4D42]'
+                  {/* Duolingo Tactile Choice Bars ①–⑤ */}
+                  <p
+                    className={`text-xs sm:text-sm font-bold px-1 ${
+                      isLavender ? 'text-[#49467A]' : 'text-[#5C4D42]'
                     }`}
                   >
-                    {question.footnotes.map((fn) => (
-                      <span key={fn.term}>
-                        <strong className={`font-mono ${isLavender ? 'text-[#1D1B42]' : 'text-[#2D2620]'}`}>
-                          *{fn.term}
-                        </strong>
-                        : {fn.meaning}
-                      </span>
-                    ))}
+                    지문과 원본 시험지를 보고 ①~⑤ 중 정답 번호를 고른 뒤 아래 버튼을 눌러 확인하세요.
+                  </p>
+                  <div className="space-y-3">
+                    {question.choices.map((choice, idx) => {
+                      const choiceNum = idx + 1;
+                      const isSelected = selectedBossChoice === choiceNum;
+                      const isCorrectChoice = question.answerIndex === choiceNum;
+                      const showResult = bossFeedback?.submitted;
+
+                      let style = isLavender
+                        ? 'dq-btn-3d bg-white border-[#D3D1EC] hover:border-[#6A52A3] text-[#14132E]'
+                        : 'dq-btn-3d bg-white border-[#E5E5E5] hover:border-[#1CB0F6] text-[#1E1915]';
+                      if (showResult && bossFeedback.isCorrect && isCorrectChoice) {
+                        style =
+                          'dq-btn-3d bg-[#D7FFB8] border-[#58CC02] text-[#1E4600] font-bold';
+                      } else if (showResult && isSelected && !isCorrectChoice) {
+                        style = 'dq-btn-3d bg-[#FFDFE0] border-[#FF4B4B] text-[#7A1212]';
+                      } else if (isSelected) {
+                        style = isLavender
+                          ? 'dq-btn-3d bg-[#EAE3FA] border-[#6A52A3] text-[#14132E] font-bold'
+                          : 'dq-btn-3d bg-[#DDF4FF] border-[#1CB0F6] text-[#143752] font-bold';
+                      }
+
+                      return (
+                        <button
+                          key={choiceNum}
+                          type="button"
+                          onClick={() => {
+                            setSelectedBossChoice(choiceNum);
+                            if (bossFeedback?.submitted && !bossFeedback.isCorrect) {
+                              setBossFeedback(null);
+                            }
+                          }}
+                          className={`w-full text-left px-5 py-4 rounded-2xl border-2 transition-all flex items-start justify-between gap-3.5 cursor-pointer min-h-[64px] ${style}`}
+                        >
+                          <div className="flex items-start gap-3.5">
+                            <span
+                              className={`w-8 h-8 rounded-xl border-2 flex items-center justify-center font-mono text-sm font-extrabold shrink-0 mt-0.5 ${
+                                isSelected
+                                  ? showResult && !bossFeedback.isCorrect && !isCorrectChoice
+                                    ? 'bg-[#FF4B4B] border-[#D92B2B] text-white'
+                                    : showResult && bossFeedback.isCorrect && isCorrectChoice
+                                      ? 'bg-[#58CC02] border-[#46A302] text-white'
+                                      : isLavender
+                                        ? 'bg-[#6A52A3] border-[#523B8C] text-white'
+                                        : 'bg-[#1CB0F6] border-[#1899D6] text-white'
+                                  : isLavender
+                                    ? 'bg-[#F3F2FC] border-[#C9C2E8] text-[#5B489E]'
+                                    : 'bg-[#FAFAFA] border-[#E5E5E5] text-[#777777]'
+                              }`}
+                            >
+                              {choiceNum}
+                            </span>
+                            <span className="text-base sm:text-lg leading-relaxed font-semibold">
+                              {choice}
+                            </span>
+                          </div>
+
+                          {showResult && bossFeedback.isCorrect && isCorrectChoice && (
+                            <span className="inline-flex items-center gap-1 text-sm font-extrabold text-[#285E00] shrink-0 mt-1">
+                              <Check className="w-5 h-5" />
+                              정답
+                            </span>
+                          )}
+                          {showResult && isSelected && !isCorrectChoice && (
+                            <span className="text-sm font-extrabold text-[#EA2B2B] shrink-0 mt-1">
+                              다시 확인
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
-              <div className="space-y-2.5">
-                {question.choices.map((choice, idx) => {
-                  const choiceNum = idx + 1;
-                  const isSelected = selectedBossChoice === choiceNum;
-                  const isCorrectChoice = question.answerIndex === choiceNum;
-                  const showResult = bossFeedback?.submitted;
-
-                  let style = isLavender
-                    ? 'bg-white border-[#D3D1EC] hover:border-[#6A52A3] text-[#1D1B42]'
-                    : 'bg-white border-[#EAE0D0] hover:border-[#9B785D] text-[#2D2620]';
-                  if (showResult && bossFeedback.isCorrect && isCorrectChoice) {
-                    style =
-                      'bg-[#9BCB83]/25 border-[#5D8A43] text-[#1A3110] font-bold';
-                  } else if (showResult && isSelected && !isCorrectChoice) {
-                    style = 'bg-[#F39A83]/25 border-[#D1684E] text-[#4A1E13]';
-                  } else if (isSelected) {
-                    style = isLavender
-                      ? 'bg-[#E5DFFA] border-[#6A52A3] text-[#1E1442] ring-2 ring-[#A9DDF5] font-semibold'
-                      : 'bg-[#FFE18A]/45 border-[#C9961A] text-[#2D2620] ring-2 ring-[#FFE18A] font-semibold';
-                  }
-
-                  return (
-                    <button
-                      key={choiceNum}
-                      type="button"
-                      onClick={() => {
-                        setSelectedBossChoice(choiceNum);
-                        if (bossFeedback?.submitted && !bossFeedback.isCorrect) {
-                          setBossFeedback(null);
-                        }
-                      }}
-                      className={`w-full text-left px-4 py-3 rounded-2xl border-2 transition-all flex items-start justify-between gap-3 cursor-pointer min-h-[48px] ${style}`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <span
-                          className={`font-mono text-base font-bold shrink-0 ${
-                            isLavender ? 'text-[#5D4C9E]' : 'text-[#9B785D]'
+              {/* STAGE 3: Focused Summary, Explanation & Note */}
+              {stage === 3 && (
+                <div className="space-y-5">
+                  <div
+                    className={`rounded-3xl border-2 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                      isLavender
+                        ? 'border-[#C9B9E8] bg-gradient-to-r from-[#F5F2FF] to-white'
+                        : 'border-[#A5ED6E] bg-gradient-to-r from-[#EEFFD9] to-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3.5">
+                      <div
+                        className={`w-16 h-16 rounded-2xl overflow-hidden border-2 bg-white flex items-center justify-center shrink-0 shadow-xs ${
+                          isLavender ? 'border-[#8D7AD6]' : 'border-[#58CC02]'
+                        }`}
+                      >
+                        {museumImgError ? (
+                          <Award className="w-8 h-8 text-[#58CC02]" />
+                        ) : (
+                          <img
+                            src={mascotImage}
+                            alt="여우 캐릭터 축하"
+                            onError={() => setMuseumImgError(true)}
+                            className="w-full h-full object-cover"
+                          />
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <div className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-extrabold text-[#58A700]">
+                          <Sparkles className="w-4 h-4" />
+                          <span>풀이 완료! 노트에 자동 저장됨</span>
+                        </div>
+                        <h2
+                          className={`text-xl sm:text-2xl font-extrabold ${
+                            isLavender ? 'text-[#211442]' : 'text-[#1E1915]'
                           }`}
                         >
-                          {CIRCLED[idx] ?? `${choiceNum}.`}
-                        </span>
-                        <span className="text-sm sm:text-base leading-relaxed">
-                          {choice}
-                        </span>
+                          {question.sourceExam} · 정답 {CIRCLED[question.answerIndex - 1]}
+                        </h2>
                       </div>
-
-                      {showResult && bossFeedback.isCorrect && isCorrectChoice && (
-                        <span className="inline-flex items-center gap-1 text-xs font-extrabold text-[#4C7A34] shrink-0 mt-1">
-                          <Check className="w-4 h-4" />
-                          정답
-                        </span>
-                      )}
-                      {showResult && isSelected && !isCorrectChoice && (
-                        <span className="text-xs font-extrabold text-[#C25D44] shrink-0 mt-1">
-                          다시 확인
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() => setPngModalOpen(true)}
-                  className="text-xs font-bold text-[#5C4D42] hover:text-[#2D2620] inline-flex items-center gap-1.5 cursor-pointer lg:hidden"
-                >
-                  <FileImage className="w-3.5 h-3.5" />
-                  <span>원본 시험지 크게 보기</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={selectedBossChoice === null}
-                  onClick={handleBossSubmit}
-                  className={`clay-btn ml-auto px-6 py-3 rounded-2xl font-extrabold text-sm sm:text-base disabled:opacity-45 disabled:cursor-not-allowed cursor-pointer ${
-                    isLavender
-                      ? 'bg-[#C9B9E8] text-[#211442]'
-                      : 'bg-[#F39A83] text-[#2D2620]'
-                  }`}
-                >
-                  {selectedBossChoice === null
-                    ? '보기 ①~⑤ 중 하나를 먼저 눌러주세요'
-                    : `${selectedBossChoice}번으로 정답 확인하기`}
-                </button>
-              </div>
-
-              {bossFeedback?.submitted && (
-                <div
-                  className={`rounded-2xl border-2 p-4 sm:p-5 space-y-3.5 ${
-                    bossFeedback.isCorrect
-                      ? 'bg-[#9BCB83]/20 border-[#5D8A43]'
-                      : 'bg-[#F39A83]/20 border-[#D1684E]'
-                  }`}
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="flex flex-wrap items-center gap-2 text-sm sm:text-base font-extrabold text-[#2D2620]">
-                      {bossFeedback.isCorrect ? (
-                        <>
-                          <Star className="w-5 h-5 text-[#9B6B00] fill-[#FFE18A] animate-star-pop" />
-                          <span>
-                            정답입니다! ({CIRCLED[question.answerIndex - 1]})
-                            {bossFeedback.xpDelta > 0
-                              ? ` +${bossFeedback.xpDelta} XP`
-                              : ''}
-                          </span>
-                          {bossFeedback.perfectBonus && (
-                            <span className="text-xs font-extrabold text-[#4C7A34]">
-                              · 한 번에 정답!
-                            </span>
-                          )}
-                          {bossFeedback.comboBonus > 0 && (
-                            <span className="text-xs font-extrabold text-[#C25D44]">
-                              · 콤보 보너스 +{bossFeedback.comboBonus} XP
-                            </span>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          <RotateCcw className="w-5 h-5 text-[#C25D44]" />
-                          <span>좋은 흐름이었어! 아래 힌트를 보고 다른 보기를 눌러보자</span>
-                        </>
-                      )}
                     </div>
 
-                    {bossFeedback.isCorrect && (
-                      <div className="inline-flex items-center gap-1 bg-white/85 px-2.5 py-1 rounded-xl border border-[#5D8A43]/40">
-                        {[1, 2, 3].map((s) => (
-                          <Star
-                            key={s}
-                            className={`w-4 h-4 ${
-                              s <= bossFeedback.earnedStars
-                                ? 'text-[#B47A00] fill-[#FFE18A]'
-                                : 'text-[#D6C8B4]'
-                            }`}
-                          />
-                        ))}
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <div className="inline-flex items-center gap-1 px-3 py-2 rounded-2xl bg-white border-2 border-[#EAE0D0]">
+                        {[1, 2, 3].map((s) => {
+                          const earned = s <= progress.stars;
+                          return (
+                            <Star
+                              key={s}
+                              style={{ animationDelay: `${(s - 1) * 110}ms` }}
+                              className={`w-5 h-5 ${
+                                earned
+                                  ? 'text-[#FFC800] fill-[#FFC800] animate-star-pop'
+                                  : 'text-[#E5E5E5]'
+                              }`}
+                            />
+                          );
+                        })}
                       </div>
-                    )}
+                      <div className="px-3.5 py-2 rounded-2xl border-2 border-[#FFC800] bg-[#FFFBEB] font-mono text-sm font-extrabold text-[#58A700] tabular-nums">
+                        +{displayXpCount} XP
+                      </div>
+                      <div className="px-3.5 py-2 rounded-2xl border-2 border-[#84D8FF] bg-[#F2FAFF] font-mono text-sm font-extrabold text-[#143752] tabular-nums">
+                        단서 {progress.discoveredClues.length}/{clueCards.length}
+                      </div>
+                    </div>
                   </div>
 
-                  {bossFeedback.isCorrect ? (
-                    <>
-                      <p className="text-sm text-[#2D2620] leading-relaxed">
-                        {question.answerNote}
+                  {newlyUnlockedBadgeTitles.length > 0 && (
+                    <div className="rounded-2xl border-2 bg-[#FFF6DA] border-[#FFC800] p-4">
+                      <div className="text-sm font-extrabold mb-1.5 text-[#7B5600]">
+                        새로 획득한 배지!
+                      </div>
+                      <div className="flex flex-wrap gap-2.5">
+                        {newlyUnlockedBadgeTitles.map((title) => (
+                          <span
+                            key={title}
+                            className="inline-flex items-center gap-1.5 text-base font-extrabold text-[#1E1915]"
+                          >
+                            <Award className="w-5 h-5 text-[#B47A00]" />
+                            {title}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="rounded-2xl border-2 border-[#58CC02] bg-[#EEFFD9]/70 p-5 space-y-2">
+                    <div className="flex items-center gap-2 text-sm sm:text-base font-extrabold text-[#1E4600]">
+                      <CheckCircle2 className="w-5 h-5 text-[#46A302]" />
+                      <span>정답 해설 ({CIRCLED[question.answerIndex - 1]})</span>
+                    </div>
+                    <p className="text-sm sm:text-base text-[#1E1915] leading-relaxed font-medium">
+                      {question.answerNote}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border-2 border-[#E5E5E5] bg-[#FAFAFA] p-4 sm:p-5 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <label
+                        htmlFor={`quest-note-${question.id}`}
+                        className="text-sm font-extrabold text-[#4B4B4B]"
+                      >
+                        내 오답 · 해석 노트 (자동 저장)
+                      </label>
+                      {customTranscript && (
+                        <button
+                          type="button"
+                          onClick={() => onUpdateTranscript(question.id, '')}
+                          className="text-sm font-bold text-[#1CB0F6] hover:underline cursor-pointer"
+                        >
+                          지우기
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {[
+                        '#모르는단어',
+                        '#문장구조어려움',
+                        '#해석헷갈림',
+                        '#보기함정주의',
+                        '#선생님께질문',
+                      ].map((tag) => {
+                        const hasTag = customTranscript.includes(tag);
+                        return (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={() => {
+                              const nextVal = hasTag
+                                ? customTranscript.replace(tag, '').replace(/\s{2,}/g, ' ').trim()
+                                : customTranscript.trim()
+                                  ? `${customTranscript.trim()} ${tag}`
+                                  : tag;
+                              onUpdateTranscript(question.id, nextVal);
+                            }}
+                            className={`min-h-[34px] px-3 py-1 rounded-xl border text-xs sm:text-sm font-extrabold cursor-pointer transition-colors ${
+                              hasTag
+                                ? 'bg-[#DDF4FF] border-[#1CB0F6] text-[#143752]'
+                                : 'bg-white border-[#E5E5E5] text-[#5C4D42] hover:border-[#1CB0F6]'
+                            }`}
+                          >
+                            {tag}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <textarea
+                      id={`quest-note-${question.id}`}
+                      rows={2}
+                      value={customTranscript}
+                      onChange={(e) => onUpdateTranscript(question.id, e.target.value)}
+                      placeholder="내가 헷갈렸던 단어나 핵심 문장 해석을 자유롭게 적어두세요."
+                      className="w-full px-4 py-3 text-base bg-white border-2 border-[#E5E5E5] rounded-xl focus:outline-none focus:border-[#1CB0F6] text-[#1E1915]"
+                    />
+                  </div>
+
+                  <div className="rounded-2xl border-2 border-[#E5E5E5] bg-white p-4 sm:p-5 flex items-start gap-3">
+                    <img
+                      src={discoveryMuseumImg}
+                      alt="수집품 수첩"
+                      onError={() => setMuseumImgError(true)}
+                      className="w-16 h-14 rounded-xl object-cover border border-[#E5E5E5] shrink-0 hidden sm:block"
+                    />
+                    <div className="space-y-1">
+                      <div className="text-sm font-extrabold text-[#1E1915]">
+                        오늘의 독해 전략 요약
+                      </div>
+                      <p className="text-sm text-[#4B4B4B] leading-relaxed">
+                        {question.keyFocus}
                       </p>
-                      <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* STICKY ZERO-SCROLL DUOLINGO-STYLE BOTTOM PAGE-TURN / FEEDBACK SHEET */}
+            {stage === 2 && bossFeedback?.submitted ? (
+              <div
+                className={`sticky bottom-2 z-20 rounded-b-3xl shadow-[0_-8px_22px_rgba(30,25,21,0.08)] border-t-2 px-5 sm:px-7 py-4 sm:py-5 space-y-3 ${
+                  !reducedMotion ? 'rq-feedback-rise' : ''
+                } ${
+                  bossFeedback.isCorrect
+                    ? 'bg-[#D7FFB8] border-[#A5ED6E]'
+                    : 'bg-[#FFDFE0] border-[#FF9C9E]'
+                }`}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1.5 flex-1">
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <span
+                        className={`w-8 h-8 rounded-full bg-white flex items-center justify-center shrink-0 ${
+                          bossFeedback.isCorrect ? 'text-[#58A700]' : 'text-[#EA2B2B]'
+                        }`}
+                      >
+                        {bossFeedback.isCorrect ? (
+                          <Check className="w-5 h-5 stroke-[3]" />
+                        ) : (
+                          <X className="w-5 h-5 stroke-[3]" />
+                        )}
+                      </span>
+                      <span
+                        className={`text-lg sm:text-xl font-extrabold ${
+                          bossFeedback.isCorrect ? 'text-[#285E00]' : 'text-[#9A1B1B]'
+                        }`}
+                      >
+                        {bossFeedback.isCorrect
+                          ? `정답이에요! 멋져요!${
+                              bossFeedback.xpDelta > 0
+                                ? ` (+${bossFeedback.xpDelta} XP)`
+                                : ''
+                            }`
+                          : '아쉬워요! 힌트를 보고 다시 골라볼까요?'}
+                      </span>
+                      {bossFeedback.isCorrect && bossFeedback.perfectBonus && (
+                        <span className="text-xs sm:text-sm font-extrabold text-[#285E00]">
+                          · 한 번에 정답!
+                        </span>
+                      )}
+                    </div>
+                    <p
+                      className={`text-sm sm:text-base font-bold leading-relaxed ${
+                        bossFeedback.isCorrect ? 'text-[#1E4600]' : 'text-[#7A1212]'
+                      }`}
+                    >
+                      {bossFeedback.isCorrect
+                        ? `해설: ${question.answerNote}`
+                        : `힌트: ${getChoiceWrongHint(question, selectedBossChoice)}`}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                    {bossFeedback.isCorrect ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleSafeRestartMission(2)}
+                          className="dq-btn-3d min-h-[50px] px-4 py-2.5 rounded-2xl bg-white border-2 border-[#84D8FF] text-sm sm:text-base font-extrabold text-[#143752] inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          <span>다시 풀어보기</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleGuardedStageChange(3)}
+                          className="dq-btn-3d min-h-[50px] px-5 py-2.5 rounded-2xl bg-white border-2 border-[#A5ED6E] text-sm sm:text-base font-extrabold text-[#285E00] cursor-pointer"
+                        >
+                          해설 · 오답 메모
+                        </button>
                         {hasNextMission ? (
                           <button
                             type="button"
                             onClick={onGoNextMission}
-                            className={`clay-btn px-5 py-2.5 rounded-xl text-sm font-extrabold inline-flex items-center gap-1.5 cursor-pointer ${
-                              isLavender
-                                ? 'bg-[#A9DDF5] text-[#133554]'
-                                : 'bg-[#A8DCC8] text-[#163B2D]'
+                            className={`dq-btn-3d min-h-[52px] px-7 py-2.5 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-white text-base font-extrabold inline-flex items-center gap-2 cursor-pointer ${
+                              !reducedMotion ? 'rq-unlock-pulse' : ''
                             }`}
                           >
-                            <span>다음 문제 바로 풀기</span>
-                            <ArrowRight className="w-4 h-4" />
+                            <span>
+                              {nextMissionLabel
+                                ? `다음 문제 (${nextMissionLabel})`
+                                : '다음 문제 바로 풀기'}
+                            </span>
+                            <ArrowRight className="w-5 h-5" />
                           </button>
                         ) : (
                           <button
                             type="button"
                             onClick={() => handleGuardedStageChange(3)}
-                            className={`clay-btn px-5 py-2.5 rounded-xl text-sm font-extrabold inline-flex items-center gap-1.5 cursor-pointer ${
-                              isLavender
-                                ? 'bg-[#A9DDF5] text-[#133554]'
-                                : 'bg-[#A8DCC8] text-[#163B2D]'
-                            }`}
+                            className="dq-btn-3d min-h-[52px] px-7 py-2.5 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-white text-base font-extrabold inline-flex items-center gap-2 cursor-pointer"
                           >
-                            <span>최종 결과 · 노트 보기</span>
-                            <ArrowRight className="w-4 h-4" />
+                            <span>최종 결과 보기</span>
+                            <ArrowRight className="w-5 h-5" />
                           </button>
                         )}
+                      </>
+                    ) : (
+                      <>
                         <button
                           type="button"
-                          onClick={() => handleGuardedStageChange(3)}
-                          className={`px-4 py-2.5 rounded-xl bg-white border-2 text-xs sm:text-sm font-bold cursor-pointer ${
-                            isLavender
-                              ? 'border-[#C9C2E8] text-[#1D1B42] hover:border-[#6A52A3]'
-                              : 'border-[#EAE0D0] text-[#2D2620] hover:border-[#9B785D]'
-                          }`}
+                          onClick={() => setBeginnerHintOpen(true)}
+                          className="dq-btn-3d min-h-[48px] px-4 py-2.5 rounded-2xl bg-[#FFF8E0] border-2 border-[#D4A72C] text-[#6B4A00] text-sm sm:text-base font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
                         >
-                          별 등급 · 메모 남기기
+                          <BookOpen className="w-4 h-4" />
+                          <span>쉬운 힌트 바로 보기</span>
                         </button>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="rounded-xl bg-white/85 border border-[#F39A83] p-3 text-xs sm:text-sm text-[#4A1E13] space-y-1.5">
-                      <div className="font-extrabold">탐정 힌트:</div>
-                      <p>{question.keyFocus}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* STAGE 3: MY DISCOVERY (with 3-Star Rating & 0.5s XP Count-up) */}
-          {stage === 3 && (
-            <div className="space-y-5">
-              <div
-                className={`rounded-3xl border-2 p-5 flex flex-col sm:flex-row items-center gap-5 ${
-                  isLavender
-                    ? 'border-[#C9B9E8] bg-[#F3F1FC]'
-                    : 'border-[#EAE0D0] bg-[#FFF9EF]'
-                }`}
-              >
-                <div
-                  className={`w-36 h-28 rounded-2xl overflow-hidden border-2 bg-white shrink-0 flex items-center justify-center ${
-                    isLavender ? 'border-[#C9B9E8]' : 'border-[#EAE0D0]'
-                  }`}
-                >
-                  {museumImgError ? (
-                    <Award className={`w-10 h-10 ${isLavender ? 'text-[#6852A3]' : 'text-[#9B785D]'}`} />
-                  ) : (
-                    <img
-                      src={discoveryMuseumImg}
-                      alt="탐정 발견 기록 수첩"
-                      onError={() => setMuseumImgError(true)}
-                      className="w-full h-full object-cover"
-                    />
-                  )}
-                </div>
-                <div className="space-y-2 text-center sm:text-left flex-1">
-                  <div className={`inline-flex items-center gap-1.5 text-xs font-extrabold ${isLavender ? 'text-[#4B3B94]' : 'text-[#4C7A34]'}`}>
-                    <Sparkles className="w-4 h-4" />
-                    <span>탐험 발견 노트에 기록됨!</span>
-                  </div>
-                  <h2 className={`text-lg sm:text-xl font-extrabold ${isLavender ? 'text-[#1D1B42]' : 'text-[#2D2620]'}`}>
-                    {question.sourceExam} · {question.sectionTitle} 클리어!
-                  </h2>
-
-                  {/* 3-Star Mastery Display */}
-                  <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-0.5">
-                    <div className="inline-flex items-center gap-1">
-                      {[1, 2, 3].map((s) => {
-                        const earned = s <= progress.stars;
-                        return (
-                          <Star
-                            key={s}
-                            style={{ animationDelay: `${(s - 1) * 110}ms` }}
-                            className={`w-6 h-6 ${
-                              earned
-                                ? 'text-[#B47A00] fill-[#FFE18A] animate-star-pop'
-                                : 'text-[#D6C8B4]'
-                            }`}
-                          />
-                        );
-                      })}
-                    </div>
-                    <span className={`text-xs font-bold ${isLavender ? 'text-[#49467A]' : 'text-[#5C4D42]'}`}>
-                      {progress.stars === 3
-                        ? '★3 완벽 마스터!'
-                        : progress.stars === 2
-                          ? '★2 우수! 단서 전부 모으고 원샷 도전 시 ★3'
-                          : progress.stars === 1
-                            ? '★1 클리어! 단서 채집하면 별이 올라가요'
-                            : '실전 도전 완료 시 별 등급 획득'}
-                    </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBossFeedback(null);
+                            setSelectedBossChoice(null);
+                          }}
+                          className="dq-btn-3d min-h-[48px] px-5 py-2.5 rounded-2xl bg-white border-2 border-[#FF9C9E] text-[#9A1B1B] text-sm sm:text-base font-extrabold cursor-pointer"
+                        >
+                          다른 번호 고르기
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div className={`rounded-2xl border-2 p-3.5 ${isLavender ? 'border-[#C6BEE8] bg-[#FAF9FF]' : 'border-[#EAE0D0] bg-white'}`}>
-                  <div className={`text-[11px] font-bold ${isLavender ? 'text-[#524F80]' : 'text-[#6E5E52]'}`}>획득 XP</div>
-                  <div className={`text-xl font-extrabold font-mono tabular-nums mt-0.5 ${isLavender ? 'text-[#3B6FB6]' : 'text-[#4C7A34]'}`}>
-                    +{displayXpCount}
-                  </div>
-                </div>
-                <div className={`rounded-2xl border-2 p-3.5 ${isLavender ? 'border-[#C6BEE8] bg-[#FAF9FF]' : 'border-[#EAE0D0] bg-white'}`}>
-                  <div className={`text-[11px] font-bold ${isLavender ? 'text-[#524F80]' : 'text-[#6E5E52]'}`}>채집 단서</div>
-                  <div className={`text-xl font-extrabold font-mono tabular-nums mt-0.5 ${isLavender ? 'text-[#1D1B42]' : 'text-[#2D2620]'}`}>
-                    {progress.discoveredClues.length}/{clueCards.length}
-                  </div>
-                </div>
-                <div className={`rounded-2xl border-2 p-3.5 ${isLavender ? 'border-[#C6BEE8] bg-[#FAF9FF]' : 'border-[#EAE0D0] bg-white'}`}>
-                  <div className={`text-[11px] font-bold ${isLavender ? 'text-[#524F80]' : 'text-[#6E5E52]'}`}>정답</div>
-                  <div className={`text-xl font-extrabold font-mono tabular-nums mt-0.5 ${isLavender ? 'text-[#6852A3]' : 'text-[#9B785D]'}`}>
-                    {CIRCLED[question.answerIndex - 1]}
-                  </div>
-                </div>
-              </div>
-
-              {newlyUnlockedBadgeTitles.length > 0 && (
-                <div
-                  className={`rounded-2xl border-2 p-4 ${
-                    isLavender
-                      ? 'bg-[#E7E0FA] border-[#7963A8]'
-                      : 'bg-[#FFE18A]/45 border-[#D4A72C]'
-                  }`}
-                >
-                  <div className={`text-xs font-extrabold mb-1 ${isLavender ? 'text-[#3F297A]' : 'text-[#7B5600]'}`}>
-                    새로 획득한 배지!
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {newlyUnlockedBadgeTitles.map((title) => (
-                      <span
-                        key={title}
-                        className="inline-flex items-center gap-1.5 text-sm font-extrabold text-[#2D2620]"
-                      >
-                        <Award className={`w-4 h-4 ${isLavender ? 'text-[#5B48A3]' : 'text-[#B47A00]'}`} />
-                        {title}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div
-                className={`rounded-2xl border-2 p-4 space-y-2 ${
-                  isLavender
-                    ? 'bg-[#F3F1FC] border-[#C9B9E8]'
-                    : 'bg-[#FFF9EF] border-[#EAE0D0]'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <label
-                    htmlFor={`quest-note-${question.id}`}
-                    className={`text-xs font-bold ${isLavender ? 'text-[#49467A]' : 'text-[#5C4D42]'}`}
-                  >
-                    내 오답 · 해석 노트 (자동 저장)
-                  </label>
-                  {customTranscript && (
-                    <button
-                      type="button"
-                      onClick={() => onUpdateTranscript(question.id, '')}
-                      className={`text-xs font-semibold hover:underline cursor-pointer ${
-                        isLavender ? 'text-[#5B48A3]' : 'text-[#9B785D]'
-                      }`}
-                    >
-                      지우기
-                    </button>
-                  )}
-                </div>
-                <textarea
-                  id={`quest-note-${question.id}`}
-                  rows={2}
-                  value={customTranscript}
-                  onChange={(e) => onUpdateTranscript(question.id, e.target.value)}
-                  placeholder="내가 헷갈렸던 단어나 핵심 문장 해석을 자유롭게 적어두세요."
-                  className={`w-full px-3.5 py-2.5 text-sm bg-white border-2 rounded-xl focus:outline-none ${
-                    isLavender
-                      ? 'text-[#1D1B42] border-[#C9C2E8] focus:border-[#6A52A3]'
-                      : 'text-[#2D2620] border-[#EAE0D0] focus:border-[#9B785D]'
-                  }`}
-                />
-              </div>
-
-              <div className="rounded-2xl border-2 border-[#9BCB83] bg-[#9BCB83]/15 p-4 space-y-2">
-                <div className="flex items-center gap-2 text-xs font-extrabold text-[#264218]">
-                  <CheckCircle2 className="w-4 h-4 text-[#4C7A34]" />
-                  <span>정답 해설 ({CIRCLED[question.answerIndex - 1]})</span>
-                </div>
-                <p className="text-xs sm:text-sm text-[#2D2620] leading-relaxed">
-                  {question.answerNote}
-                </p>
-              </div>
-
-              <div
-                className={`rounded-2xl border-2 p-4 space-y-2 ${
-                  isLavender
-                    ? 'border-[#B4C7EE] bg-[#F5F8FF]'
-                    : 'border-[#EAE0D0] bg-white'
-                }`}
-              >
-                <div className={`flex items-center gap-2 text-xs font-extrabold ${isLavender ? 'text-[#1D2D5E]' : 'text-[#2D2620]'}`}>
-                  <BookOpen className={`w-4 h-4 ${isLavender ? 'text-[#5B48A3]' : 'text-[#9B785D]'}`} />
-                  <span>오늘의 독해 전략 요약</span>
-                </div>
-                <p className={`text-xs sm:text-sm leading-relaxed ${isLavender ? 'text-[#2F3361]' : 'text-[#4B3F35]'}`}>
-                  {question.keyFocus}
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                <div className="flex flex-wrap items-center gap-2">
+            ) : stage === 3 ? (
+              <div className="sticky bottom-2 z-20 rounded-b-3xl shadow-[0_-8px_22px_rgba(30,25,21,0.08)] border-t-2 border-[#E5E5E5] bg-[#FAFAFA] px-5 sm:px-7 py-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2.5">
                   <button
                     type="button"
                     onClick={onBackToMap}
-                    className={`clay-btn px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold cursor-pointer ${
-                      isLavender
-                        ? 'bg-[#EEF3FD] text-[#1D2D5E]'
-                        : 'bg-[#FFF9EF] text-[#2D2620]'
-                    }`}
+                    className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl bg-white border-2 border-[#E5E5E5] text-sm sm:text-base font-extrabold text-[#4B4B4B] cursor-pointer"
                   >
-                    탐험 지도로
+                    전체 문제로
                   </button>
                   <button
                     type="button"
                     onClick={() => handleGuardedStageChange(2)}
-                    className={`px-4 py-2.5 rounded-2xl border-2 bg-white text-xs sm:text-sm font-bold cursor-pointer ${
-                      isLavender
-                        ? 'border-[#C9C2E8] text-[#49467A] hover:text-[#1D1B42]'
-                        : 'border-[#EAE0D0] text-[#5C4D42] hover:text-[#2D2620]'
-                    }`}
+                    className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl bg-white border-2 border-[#E5E5E5] text-sm sm:text-base font-bold text-[#4B4B4B] inline-flex items-center gap-1.5 cursor-pointer"
                   >
-                    문제 다시 보기
+                    <ArrowLeft className="w-4 h-4" />
+                    <span>문제 다시 보기</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => handleSafeRestartMission(0)}
-                    className={`px-4 py-2.5 rounded-2xl border-2 text-xs sm:text-sm font-extrabold inline-flex items-center gap-1.5 cursor-pointer ${
-                      isLavender
-                        ? 'border-[#6A52A3] bg-[#DFD6FA]/60 text-[#211442] hover:bg-[#DFD6FA]'
-                        : 'border-[#4D9479] bg-[#A8DCC8]/35 text-[#163B2D] hover:bg-[#A8DCC8]/60'
-                    }`}
+                    className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl bg-white border-2 border-[#84D8FF] text-sm sm:text-base font-extrabold text-[#143752] inline-flex items-center gap-1.5 cursor-pointer"
                   >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>기록 유지 · 처음부터 다시 풀기</span>
+                    <RotateCcw className="w-4 h-4" />
+                    <span>이 문제 다시 풀기</span>
                   </button>
+                  {onOpenReview && hasNextMission && (
+                    <button
+                      type="button"
+                      onClick={onOpenReview}
+                      className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl bg-[#FFF6DA] border-2 border-[#FFC800] text-sm sm:text-base font-extrabold text-[#6B4A00] cursor-pointer"
+                    >
+                      오답 · 복습 보기
+                    </button>
+                  )}
                 </div>
+
                 {hasNextMission ? (
                   <button
                     type="button"
                     onClick={onGoNextMission}
-                    className={`clay-btn px-6 py-2.5 rounded-2xl text-sm font-extrabold inline-flex items-center gap-2 cursor-pointer ${
-                      isLavender
-                        ? 'bg-[#A9DDF5] text-[#133554]'
-                        : 'bg-[#A8DCC8] text-[#163B2D]'
+                    className={`dq-btn-3d min-h-[52px] px-7 py-2.5 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-white text-base font-extrabold inline-flex items-center gap-2 cursor-pointer ${
+                      !reducedMotion ? 'rq-unlock-pulse' : ''
                     }`}
                   >
-                    <span>다음 문제 바로 풀기</span>
-                    <ArrowRight className="w-4 h-4" />
+                    <span>
+                      {nextMissionLabel
+                        ? `다음 문제 (${nextMissionLabel})`
+                        : '다음 문제 풀기'}
+                    </span>
+                    <ArrowRight className="w-5 h-5" />
                   </button>
                 ) : (
                   onOpenReview && (
                     <button
                       type="button"
                       onClick={onOpenReview}
-                      className={`clay-btn px-6 py-2.5 rounded-2xl text-sm font-extrabold inline-flex items-center gap-2 cursor-pointer ${
-                        isLavender
-                          ? 'bg-[#C9B9E8] text-[#211442]'
-                          : 'bg-[#FFE18A] text-[#2D2620]'
-                      }`}
+                      className="dq-btn-3d min-h-[52px] px-7 py-2.5 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-white text-base font-extrabold inline-flex items-center gap-2 cursor-pointer"
                     >
                       <span>오답 · 복습 보러 가기</span>
-                      <ArrowRight className="w-4 h-4" />
+                      <ArrowRight className="w-5 h-5" />
                     </button>
                   )
                 )}
               </div>
-            </div>
-          )}
+            ) : (
+              /* Sticky Zero-Scroll Bottom Action Bar for Stage 0, Stage 1 Sub-Pages, and Stage 2 Pre-Submit */
+              <div
+                className={`sticky bottom-2 z-20 rounded-b-3xl shadow-[0_-8px_22px_rgba(30,25,21,0.08)] border-t-2 px-5 sm:px-7 py-4 space-y-2.5 ${
+                  (stage === 0 && isStage0Done) || (stage === 1 && isStage1Done)
+                    ? 'bg-[#D7FFB8] border-[#A5ED6E]'
+                    : 'bg-[#FAFAFA] border-[#E5E5E5]'
+                }`}
+              >
+                {stage === 0 && !isStage0Done && (
+                  <div className="rounded-xl border border-[#EAE0D0] bg-white px-3.5 py-2 text-xs sm:text-sm font-bold text-[#5C4D42] flex items-center gap-2">
+                    <Lightbulb className="w-4 h-4 shrink-0 text-[#D4A72C]" />
+                    <span>
+                      단서 카드({progress.discoveredClues.length}/{clueCards.length})를 열거나, 원하면 바로 다음 페이지로 넘어갈 수 있어요.
+                    </span>
+                  </div>
+                )}
 
-          {/* Bottom Stage Navigation (strictly locked until current stage requirement is met) */}
-          {stage < 3 && (
-            <div className={`pt-4 border-t-2 space-y-2.5 ${isLavender ? 'border-[#E5E2F5]' : 'border-[#F2ECE1]'}`}>
-              {stage >= maxUnlockedStage && (
-                <div
-                  className={`rounded-xl border px-3.5 py-2 text-xs font-bold flex items-center gap-2 ${
-                    isLavender
-                      ? 'bg-[#EFEBF9] border-[#9B85D1] text-[#3C286E]'
-                      : 'bg-[#FFF6DA]/70 border-[#E0B94B] text-[#6E4D00]'
-                  }`}
-                >
-                  <Lock className="w-3.5 h-3.5 shrink-0" />
-                  <span>
-                    {stage === 0
-                      ? `모든 단서 카드(${progress.discoveredClues.length}/${clueCards.length})를 열어야 다음 단계(글 흐름 보기)로 넘어갈 수 있어요.`
-                      : stage === 1
-                        ? '글 흐름 순서 맞추기 또는 핵심 내용 확인을 완료해야 다음 단계(정답 고르기)로 넘어갈 수 있어요.'
-                        : '보기 ①–⑤ 중 정답을 맞혀야 마지막 단계(결과 · 노트)로 넘어갈 수 있어요.'}
-                  </span>
+                {stage === 1 && !isStage1Done && (
+                  <div className="rounded-xl border border-[#EAE0D0] bg-white px-3.5 py-2 text-xs sm:text-sm font-bold text-[#5C4D42] flex items-center gap-2">
+                    <Lightbulb className="w-4 h-4 shrink-0 text-[#1CB0F6]" />
+                    <span>
+                      {activePageKey === 'flow'
+                        ? '흐름 연습을 마치거나 바로 다음 페이지로 넘겨 정답을 고를 수 있어요.'
+                        : '의미 단위 해석을 완료하거나 바로 정답 고르기로 넘어갈 수 있어요.'}
+                    </span>
+                  </div>
+                )}
+
+                {((stage === 0 && isStage0Done) || (stage === 1 && isStage1Done)) && (
+                  <div className="flex items-center gap-2 text-sm sm:text-base font-extrabold text-[#285E00]">
+                    <CheckCircle2 className="w-5 h-5 text-[#46A302]" />
+                    <span>
+                      {stage === 0
+                        ? '단서를 모두 모았어요! 다음 페이지로 넘겨볼까요?'
+                        : activePageKey === 'flow' && currentSentenceAnalysis
+                          ? '글 흐름 완료! 의미 단위 해석 페이지로 넘기거나 바로 정답 고르기로 갈 수 있어요.'
+                          : '2단계 학습 완료! 다음 페이지(정답 고르기)로 넘겨볼까요?'}
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center justify-between gap-2.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={!prevPage}
+                      onClick={() => goToPageByIndex(activePageIdx - 1)}
+                      className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl border-2 bg-white border-[#E5E5E5] text-sm sm:text-base font-extrabold text-[#4B4B4B] disabled:opacity-40 disabled:pointer-events-none cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <ArrowLeft className="w-4 h-4" />
+                      <span>이전 페이지</span>
+                    </button>
+
+                    {stage === 2 && (
+                      <button
+                        type="button"
+                        onClick={() => setBeginnerHintOpen(true)}
+                        className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl border-2 border-[#D4A72C] bg-[#FFF8E0] text-sm sm:text-base font-extrabold text-[#6B4A00] inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <BookOpen className="w-4 h-4" />
+                        <span>쉬운 힌트</span>
+                      </button>
+                    )}
+
+                    {activePageKey === 'flow' && currentSentenceAnalysis && (
+                      <button
+                        type="button"
+                        onClick={() => handleGuardedStageChange(2)}
+                        className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl border-2 bg-white border-[#58CC02] text-sm font-extrabold text-[#285E00] inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>바로 정답 고르기 ▶</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {stage === 2 ? (
+                    <button
+                      type="button"
+                      disabled={selectedBossChoice === null}
+                      onClick={handleBossSubmit}
+                      className="dq-btn-3d ml-auto min-h-[52px] px-7 py-2.5 rounded-2xl font-extrabold text-base sm:text-lg bg-[#58CC02] border-2 border-[#46A302] text-white disabled:bg-[#E5E5E5] disabled:border-[#D4D4D4] disabled:text-[#999999] disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      {selectedBossChoice === null
+                        ? '보기를 먼저 눌러주세요 (1~5 키)'
+                        : `${selectedBossChoice}번으로 정답 확인하기`}
+                    </button>
+                  ) : (
+                    nextPage && (
+                      <button
+                        type="button"
+                        onClick={() => goToPageByIndex(activePageIdx + 1)}
+                        className={`dq-btn-3d ml-auto min-h-[52px] px-6 py-2.5 rounded-2xl text-base font-extrabold inline-flex items-center gap-2 bg-[#58CC02] border-2 border-[#46A302] text-white cursor-pointer ${
+                          !reducedMotion && isNextPageUnlocked && ((stage === 0 && isStage0Done) || (stage === 1 && isStage1Done))
+                            ? 'rq-unlock-pulse'
+                            : ''
+                        }`}
+                      >
+                        <span>다음 페이지 ({nextPage.titleKo})</span>
+                        <ArrowRight className="w-5 h-5" />
+                      </button>
+                    )
+                  )}
                 </div>
-              )}
-
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <button
-                  type="button"
-                  disabled={stage === 0}
-                  onClick={() => handleGuardedStageChange((stage - 1) as LearningStage)}
-                  className={`px-4 py-2 rounded-xl border-2 text-xs sm:text-sm font-bold disabled:opacity-40 disabled:pointer-events-none cursor-pointer inline-flex items-center gap-1.5 ${
-                    isLavender
-                      ? 'border-[#CED6F2] bg-[#F5F6FF] text-[#49467A] hover:border-[#6A52A3]'
-                      : 'border-[#EAE0D0] bg-[#FFF9EF] text-[#5C4D42] hover:border-[#9B785D]'
-                  }`}
-                >
-                  <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>이전 단계</span>
-                </button>
-
-                <button
-                  type="button"
-                  disabled={stage >= maxUnlockedStage}
-                  onClick={() => handleGuardedStageChange((stage + 1) as LearningStage)}
-                  className={`px-5 py-2 rounded-xl text-xs sm:text-sm font-extrabold inline-flex items-center gap-1.5 ${
-                    stage >= maxUnlockedStage
-                      ? isLavender
-                        ? 'bg-[#ECEAF6] border-2 border-[#D2CEE6] text-[#7A7799] cursor-not-allowed'
-                        : 'bg-[#EFE8DB] border-2 border-[#DCD1BF] text-[#9B8B7C] cursor-not-allowed'
-                      : isLavender
-                        ? 'clay-btn bg-[#A9DDF5] text-[#133554] cursor-pointer'
-                        : 'clay-btn bg-[#A8DCC8] text-[#163B2D] cursor-pointer'
-                  }`}
-                >
-                  {stage >= maxUnlockedStage && <Lock className="w-3.5 h-3.5" />}
-                  <span>다음 ({STAGE_META[stage + 1].titleKo})</span>
-                  {stage < maxUnlockedStage && <ArrowRight className="w-3.5 h-3.5" />}
-                </button>
               </div>
-            </div>
-          )}
+            )}
         </section>
 
         <aside
@@ -1588,48 +2435,66 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
             compact={showSplitPane}
             currentStreak={currentStreak}
             islandTheme={islandTheme}
+            level={level}
+            equippedGearId={equippedGearId}
           />
 
           <div
-            className={`clay-card rounded-2xl p-4 space-y-2.5 ${
-              isLavender ? '!bg-[#FAF9FF] !border-[#C6BEE8]' : ''
+            className={`rounded-2xl border-2 bg-white p-5 space-y-3 shadow-xs ${
+              isLavender ? 'border-[#C6BEE8] !bg-[#FAF9FF]' : 'border-[#E5E5E5]'
             }`}
           >
-            <div className="flex items-center justify-between gap-2">
-              <div className={`flex items-center gap-2 text-xs font-extrabold ${isLavender ? 'text-[#5E4AA3]' : 'text-[#9B785D]'}`}>
-                <Lightbulb className="w-4 h-4" />
-                <span>막히면 보는 탐정 힌트</span>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div
+                className={`flex items-center gap-2 text-sm sm:text-base font-extrabold ${
+                  isLavender ? 'text-[#5E4AA3]' : 'text-[#8A6142]'
+                }`}
+              >
+                <Lightbulb className="w-5 h-5" />
+                <span>단계별 핵심 힌트</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className={`text-[11px] font-mono font-bold tabular-nums ${isLavender ? 'text-[#524F80]' : 'text-[#6E5E52]'}`}>
+                <span
+                  className={`text-xs sm:text-sm font-mono font-bold tabular-nums ${
+                    isLavender ? 'text-[#49467A]' : 'text-[#5C4D42]'
+                  }`}
+                >
                   단서 {progress.discoveredClues.length}/{clueCards.length}
                 </span>
                 <button
                   type="button"
                   onClick={() => setShowHint((prev) => !prev)}
-                  className={`px-2.5 py-1 rounded-lg border text-xs font-bold cursor-pointer ${
+                  className={`min-h-[40px] px-4 py-1.5 rounded-xl border-2 text-sm font-extrabold cursor-pointer ${
                     isLavender
-                      ? 'bg-[#F3F1FC] border-[#C9C2E8] text-[#1D1B42] hover:border-[#6A52A3]'
-                      : 'bg-[#FFF9EF] border-[#EAE0D0] text-[#2D2620] hover:border-[#9B785D]'
+                      ? 'bg-[#F3F1FC] border-[#C9C2E8] text-[#14132E] hover:border-[#6A52A3]'
+                      : 'bg-[#FAFAFA] border-[#E5E5E5] text-[#1E1915] hover:border-[#1CB0F6]'
                   }`}
                 >
-                  {showHint ? '접기' : '힌트 열기'}
+                  {showHint ? '접기' : '포인트 보기'}
                 </button>
               </div>
             </div>
-            <p className={`text-xs leading-relaxed ${isLavender ? 'text-[#49467A]' : 'text-[#5C4D42]'}`}>
+            <p
+              className={`text-sm leading-relaxed font-medium ${
+                isLavender ? 'text-[#3B386B]' : 'text-[#4B4B4B]'
+              }`}
+            >
               {stageInfo.detectiveTip}
             </p>
             {showHint && (
               <div
-                className={`rounded-xl border p-2.5 text-xs leading-relaxed ${
+                className={`rounded-xl border-2 p-3.5 text-sm leading-relaxed ${
                   isLavender
                     ? 'bg-[#E8F1FD] border-[#7AAEE3] text-[#162C5E]'
-                    : 'bg-[#FFE18A]/35 border-[#E0B94B] text-[#2D2620]'
+                    : 'bg-[#FFF8DF] border-[#E0B94B] text-[#1E1915]'
                 }`}
               >
-                <span className="font-extrabold inline-flex items-center gap-1 mr-1">
-                  <HelpCircle className={`w-3 h-3 ${isLavender ? 'text-[#3B6FB6]' : 'text-[#9B785D]'}`} />
+                <span className="font-extrabold inline-flex items-center gap-1.5 mr-1.5">
+                  <HelpCircle
+                    className={`w-4 h-4 ${
+                      isLavender ? 'text-[#3B6FB6]' : 'text-[#8A6142]'
+                    }`}
+                  />
                   핵심 포인트:
                 </span>
                 {question.keyFocus}
@@ -1639,32 +2504,43 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
         </aside>
       </div>
 
-      {/* Mobile / Fullscreen Original PNG Modal */}
+      {/* Fullscreen Original PNG Modal */}
       {pngModalOpen && (
-        <div className="fixed inset-0 z-50 bg-[#2D2620]/50 flex items-center justify-center p-3 sm:p-6">
-          <div className="w-full max-w-5xl h-[88vh] clay-card rounded-3xl overflow-hidden flex flex-col bg-[#FFF9EF]">
-            <div className="flex items-center justify-between px-5 py-3.5 border-b-2 border-[#EAE0D0] bg-white">
-              <div className="text-sm font-extrabold text-[#2D2620]">
+        <div className="fixed inset-0 z-50 bg-[#1E1915]/55 flex items-center justify-center p-3 sm:p-6">
+          <div className="w-full max-w-6xl h-[90vh] rounded-3xl border-2 border-[#E5E5E5] overflow-hidden flex flex-col bg-[#FFF9EF] shadow-2xl">
+            <div className="flex items-center justify-between px-5 py-4 border-b-2 border-[#E5E5E5] bg-white">
+              <div className="text-base font-extrabold text-[#1E1915]">
                 {question.sourceExam} 원본 시험지 ({question.pages.map((p) => `${p}p`).join('–')})
               </div>
               <button
                 type="button"
                 onClick={() => setPngModalOpen(false)}
-                className="p-2 rounded-xl bg-[#FFF9EF] border border-[#EAE0D0] text-[#2D2620] hover:bg-[#F39A83]/20 cursor-pointer"
+                className="w-10 h-10 rounded-xl bg-white border-2 border-[#E5E5E5] text-[#1E1915] hover:bg-[#FFDFE0] flex items-center justify-center cursor-pointer"
                 aria-label="원본 이미지 창 닫기"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
             <div className="flex-1 min-h-0 p-3">
               <PngViewer
                 pages={question.pages}
-                targetExamLabel={`${question.sourceExam} (${question.originalItemNumber}번)`}
+                targetExamLabel={`${question.sourceExam} (${formatItemNumber(question.originalItemNumber)})`}
+                targetQuestionId={question.id}
+                islandTheme={islandTheme}
               />
             </div>
           </div>
         </div>
       )}
+
+      {/* Struggling-Student Beginner Hint Sheet Modal */}
+      <BeginnerHintModal
+        open={beginnerHintOpen}
+        onClose={() => setBeginnerHintOpen(false)}
+        question={question}
+        analysis={currentSentenceAnalysis}
+        islandTheme={islandTheme}
+      />
 
       {/* Fox Character + Spectacular Fireworks on Question Complete */}
       <FoxFireworksCelebration
@@ -1676,15 +2552,24 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
         currentStreak={currentStreak}
         reducedMotion={reducedMotion}
         hasNextMission={hasNextMission}
+        nextQuestionLabel={nextMissionLabel}
+        islandTheme={islandTheme}
+        unlockedBadges={newlyUnlockedBadgeTitles}
+        dailyQuestBonusXp={dailyQuestBonusXp}
         onViewSummary={() => {
           setFoxCelebration(null);
+          onClearCelebrationMeta?.();
           handleGuardedStageChange(3);
         }}
         onGoNextMission={() => {
           setFoxCelebration(null);
+          onClearCelebrationMeta?.();
           onGoNextMission();
         }}
-        onClose={() => setFoxCelebration(null)}
+        onClose={() => {
+          setFoxCelebration(null);
+          onClearCelebrationMeta?.();
+        }}
       />
     </div>
   );

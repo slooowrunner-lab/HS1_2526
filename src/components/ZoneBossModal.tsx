@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import { ExtractedQuestion } from '../types/question';
+import { formatItemNumber } from '../utils/gameStorage';
 import { PngViewer } from './PngViewer';
 
 interface ZoneBossModalProps {
@@ -25,6 +26,7 @@ interface ZoneBossModalProps {
     choiceIdx: number,
   ) => void;
   onBossZoneCleared: (zoneKey: string, bonusXp: number) => void;
+  onJumpToQuestion?: (questionId: string) => void;
 }
 
 const CIRCLED = ['①', '②', '③', '④', '⑤'];
@@ -38,6 +40,7 @@ export const ZoneBossModal: React.FC<ZoneBossModalProps> = ({
   onClose,
   onRecordBossQuestionResult,
   onBossZoneCleared,
+  onJumpToQuestion,
 }) => {
   const totalSeconds = items.length * 80; // 3 items = 240s (4m), 2 items = 160s
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -104,6 +107,39 @@ export const ZoneBossModal: React.FC<ZoneBossModalProps> = ({
     setFinished(false);
   };
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (finished || !currentQuestion) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (!submittedThisQ && ['1', '2', '3', '4', '5'].includes(e.key)) {
+        const num = Number(e.key);
+        if (num <= currentQuestion.choices.length) {
+          e.preventDefault();
+          setSelectedChoice(num);
+        }
+      } else if (e.key === 'Enter') {
+        if (!submittedThisQ && selectedChoice !== null) {
+          e.preventDefault();
+          handleSubmit();
+        } else if (submittedThisQ) {
+          e.preventDefault();
+          handleNext();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
+
   const isLavender = zoneKey.startsWith('2026-');
   const correctCount = results.filter((r) => r.isCorrect).length;
   const isVictory =
@@ -134,9 +170,9 @@ export const ZoneBossModal: React.FC<ZoneBossModalProps> = ({
             </div>
             <div className="min-w-0">
               <div className={`text-xs font-extrabold ${isLavender ? 'text-[#6852A3]' : 'text-[#9B785D]'}`}>
-                구역 보스 타임어택 · {sectionTitle}
+                실전 미니테스트 · {sectionTitle}
               </div>
-              <h2 className={`text-sm sm:text-base font-extrabold truncate ${isLavender ? 'text-[#1D1B42]' : 'text-[#2D2620]'}`}>
+              <h2 className={`text-base sm:text-lg font-extrabold truncate ${isLavender ? 'text-[#1D1B42]' : 'text-[#2D2620]'}`}>
                 {zoneName}
               </h2>
             </div>
@@ -169,8 +205,8 @@ export const ZoneBossModal: React.FC<ZoneBossModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              aria-label="보스 도전 닫기"
-              className={`p-2 rounded-xl border hover:bg-[#F39A83]/20 cursor-pointer ${
+              aria-label="미니테스트 닫기"
+              className={`dq-btn-3d min-w-[40px] min-h-[40px] p-2 rounded-xl border-2 flex items-center justify-center hover:bg-[#F39A83]/20 cursor-pointer ${
                 isLavender
                   ? 'bg-[#F3F1FC] border-[#C9C2E8] text-[#1D1B42]'
                   : 'bg-[#FFF9EF] border-[#EAE0D0] text-[#2D2620]'
@@ -179,6 +215,34 @@ export const ZoneBossModal: React.FC<ZoneBossModalProps> = ({
               <X className="w-4 h-4" />
             </button>
           </div>
+
+          {!finished && items.length > 0 && (
+            <div className="w-full pt-1">
+              <div
+                className={`h-3 rounded-full overflow-hidden border ${
+                  isLavender
+                    ? 'bg-[#E6E4F6] border-[#D4CEF0]'
+                    : 'bg-[#EFECE5] border-[#E2DACB]'
+                }`}
+              >
+                <div
+                  className={`h-full rounded-full transition-all duration-300 relative overflow-hidden ${
+                    isLavender
+                      ? 'bg-gradient-to-r from-[#7C5CBF] to-[#4F8EDB]'
+                      : 'bg-[#58CC02]'
+                  }`}
+                  style={{
+                    width: `${Math.round(
+                      ((currentIdx + (submittedThisQ ? 1 : 0)) / items.length) *
+                        100,
+                    )}%`,
+                  }}
+                >
+                  <div className="h-1 bg-white/35 rounded-full mx-1.5 mt-0.5" />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Body */}
@@ -202,7 +266,7 @@ export const ZoneBossModal: React.FC<ZoneBossModalProps> = ({
               <div>
                 <h3 className="text-xl sm:text-2xl font-extrabold text-[#2D2620]">
                   {isVictory
-                    ? `${zoneName} 보스 정복 완료!`
+                    ? `${zoneName} 미니테스트 통과!`
                     : secondsLeft <= 0
                       ? '제한 시간이 종료되었어요!'
                       : '아쉽지만 한 문제만 더 집중해 보자!'}
@@ -220,7 +284,7 @@ export const ZoneBossModal: React.FC<ZoneBossModalProps> = ({
                   return (
                     <div
                       key={it.id}
-                      className={`px-3.5 py-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 ${
+                      className={`px-3.5 py-2.5 rounded-xl border text-xs sm:text-sm flex items-center justify-between gap-2 ${
                         res?.isCorrect
                           ? 'bg-[#9BCB83]/20 border-[#5D8A43] text-[#1A3110]'
                           : 'bg-[#F39A83]/15 border-[#D1684E] text-[#7A2D1C]'
@@ -229,9 +293,23 @@ export const ZoneBossModal: React.FC<ZoneBossModalProps> = ({
                       <span className="font-bold truncate">
                         {it.sourceExam} · {it.sectionTitle}
                       </span>
-                      <span className="font-extrabold shrink-0">
-                        {res ? (res.isCorrect ? '정답' : '오답') : '미제출'}
-                      </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="font-extrabold">
+                          {res ? (res.isCorrect ? '정답' : '오답') : '미제출'}
+                        </span>
+                        {onJumpToQuestion && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onClose();
+                              onJumpToQuestion(it.id);
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-white border border-[#DFD2BE] hover:border-[#9B785D] text-xs font-extrabold text-[#2D2620] cursor-pointer"
+                          >
+                            해설·복습 →
+                          </button>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -241,7 +319,7 @@ export const ZoneBossModal: React.FC<ZoneBossModalProps> = ({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="clay-btn px-5 py-2.5 rounded-xl bg-[#FFF9EF] text-sm font-bold text-[#2D2620] cursor-pointer"
+                  className="dq-btn-3d min-h-[46px] px-5 py-2.5 rounded-2xl border-2 border-[#DFD2BE] bg-[#FFF9EF] text-sm font-extrabold text-[#2D2620] cursor-pointer"
                 >
                   탐험 지도로
                 </button>
@@ -249,9 +327,9 @@ export const ZoneBossModal: React.FC<ZoneBossModalProps> = ({
                   <button
                     type="button"
                     onClick={handleRestart}
-                    className="clay-btn px-5 py-2.5 rounded-xl bg-[#A8DCC8] text-sm font-extrabold text-[#163B2D] cursor-pointer"
+                    className="dq-btn-3d min-h-[46px] px-5 py-2.5 rounded-2xl border-2 border-[#46A302] bg-[#58CC02] text-sm font-extrabold text-white cursor-pointer"
                   >
-                    보스 다시 도전
+                    미니테스트 다시 풀기
                   </button>
                 )}
               </div>
@@ -268,7 +346,9 @@ export const ZoneBossModal: React.FC<ZoneBossModalProps> = ({
               >
                 <PngViewer
                   pages={currentQuestion.pages}
-                  targetExamLabel={`${currentQuestion.sourceExam} (${currentQuestion.originalItemNumber}번)`}
+                  targetExamLabel={`${currentQuestion.sourceExam} (${formatItemNumber(currentQuestion.originalItemNumber)})`}
+                  targetQuestionId={currentQuestion.id}
+                  islandTheme={isLavender ? 'lavender' : 'spring'}
                 />
               </div>
 
@@ -293,7 +373,7 @@ export const ZoneBossModal: React.FC<ZoneBossModalProps> = ({
                     </button>
                   </div>
 
-                  <h3 className={`text-base sm:text-lg font-bold leading-relaxed ${isLavender ? 'text-[#1D1B42]' : 'text-[#2D2620]'}`}>
+                  <h3 className={`text-lg sm:text-xl font-bold leading-relaxed ${isLavender ? 'text-[#1D1B42]' : 'text-[#2D2620]'}`}>
                     {currentQuestion.prompt}
                   </h3>
 
@@ -377,7 +457,7 @@ export const ZoneBossModal: React.FC<ZoneBossModalProps> = ({
                           type="button"
                           disabled={submittedThisQ}
                           onClick={() => setSelectedChoice(num)}
-                          className={`w-full text-left px-3.5 py-2.5 rounded-xl border-2 flex items-start justify-between gap-2 text-sm cursor-pointer ${cls}`}
+                          className={`dq-btn-3d min-h-[48px] w-full text-left px-4 py-3 rounded-2xl border-2 flex items-start justify-between gap-2 text-base cursor-pointer disabled:cursor-default ${cls}`}
                         >
                           <div className="flex items-start gap-2.5">
                             <span className={`font-mono font-bold shrink-0 ${isLavender ? 'text-[#5D4C9E]' : 'text-[#9B785D]'}`}>
@@ -397,19 +477,19 @@ export const ZoneBossModal: React.FC<ZoneBossModalProps> = ({
                 {/* Bottom Action */}
                 <div className={`pt-3 border-t space-y-3 ${isLavender ? 'border-[#E5E2F5]' : 'border-[#F2ECE1]'}`}>
                   {submittedThisQ ? (
-                    <div className="space-y-2.5">
+                    <div className="rq-feedback-rise space-y-2.5">
                       <div
-                        className={`rounded-xl p-3 text-xs font-bold flex items-center gap-2 ${
+                        className={`rounded-2xl border-2 p-3.5 text-xs sm:text-sm font-bold flex items-center gap-2 ${
                           selectedChoice === currentQuestion.answerIndex
-                            ? 'bg-[#9BCB83]/25 text-[#1A3110]'
-                            : 'bg-[#F39A83]/20 text-[#7A2D1C]'
+                            ? 'bg-[#D7FFB8] border-[#58CC02] text-[#1A4205]'
+                            : 'bg-[#FFDFE0] border-[#FF4B4B] text-[#7A1B1B]'
                         }`}
                       >
                         <Star
                           className={`w-4 h-4 shrink-0 ${
                             selectedChoice === currentQuestion.answerIndex
                               ? 'text-[#9B6B00] fill-[#FFE18A] animate-star-pop'
-                              : 'text-[#C25D44]'
+                              : 'text-[#EA2B2B]'
                           }`}
                         />
                         <span>
@@ -423,33 +503,38 @@ export const ZoneBossModal: React.FC<ZoneBossModalProps> = ({
                       <button
                         type="button"
                         onClick={handleNext}
-                        className={`clay-btn w-full py-2.5 rounded-xl text-sm font-extrabold inline-flex items-center justify-center gap-1.5 cursor-pointer ${
+                        className={`dq-btn-3d min-h-[46px] w-full py-2.5 rounded-2xl border-2 text-sm font-extrabold inline-flex items-center justify-center gap-1.5 cursor-pointer text-white ${
                           isLavender
-                            ? 'bg-[#A9DDF5] text-[#133554]'
-                            : 'bg-[#A8DCC8] text-[#163B2D]'
+                            ? 'bg-[#7C5CBF] border-[#5B40A0]'
+                            : 'bg-[#58CC02] border-[#46A302]'
                         }`}
                       >
                         <span>
                           {currentIdx + 1 >= items.length
                             ? '최종 결과 확인하기'
-                            : '다음 보스 문제'}
+                            : '다음 테스트 문제'}
                         </span>
                         <ArrowRight className="w-4 h-4" />
                       </button>
                     </div>
                   ) : (
-                    <button
-                      type="button"
-                      disabled={selectedChoice === null}
-                      onClick={handleSubmit}
-                      className={`clay-btn w-full py-3 rounded-xl text-sm font-extrabold disabled:opacity-45 cursor-pointer ${
-                        isLavender
-                          ? 'bg-[#C9B9E8] text-[#211442]'
-                          : 'bg-[#F39A83] text-[#2D2620]'
-                      }`}
-                    >
-                      보스 답안 제출
-                    </button>
+                    <div className="space-y-1.5">
+                      <button
+                        type="button"
+                        disabled={selectedChoice === null}
+                        onClick={handleSubmit}
+                        className={`dq-btn-3d min-h-[48px] w-full py-3 rounded-2xl border-2 text-base font-extrabold disabled:opacity-45 cursor-pointer text-white ${
+                          isLavender
+                            ? 'bg-[#7C5CBF] border-[#5B40A0]'
+                            : 'bg-[#58CC02] border-[#46A302]'
+                        }`}
+                      >
+                        정답 제출하기
+                      </button>
+                      <div className="text-center text-xs text-[#7D6E61]">
+                        키보드 1~5번으로 선택하고 Enter로 제출할 수 있어요
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>

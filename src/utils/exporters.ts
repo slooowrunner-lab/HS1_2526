@@ -72,7 +72,11 @@ export function parseQuestBackupJson(
         gameState: {
           version: 3,
           profile: {
-            nickname: String(parsed.gameState.profile.nickname || '꼬마 탐정'),
+            nickname:
+              parsed.gameState.profile.nickname &&
+              parsed.gameState.profile.nickname !== '꼬마 탐정'
+                ? String(parsed.gameState.profile.nickname)
+                : '영어 탐험가',
             onboarded: true,
             xp: Number(parsed.gameState.profile.xp) || 0,
             currentStreak: Number(parsed.gameState.profile.currentStreak) || 0,
@@ -86,7 +90,27 @@ export function parseQuestBackupJson(
               parsed.gameState.profile.soundEnabled !== undefined
                 ? Boolean(parsed.gameState.profile.soundEnabled)
                 : true,
+            fontScale:
+              parsed.gameState.profile.fontScale === 'lg' ||
+              parsed.gameState.profile.fontScale === 'xl'
+                ? parsed.gameState.profile.fontScale
+                : 'md',
             lastActiveQuestionId: parsed.gameState.profile.lastActiveQuestionId ?? null,
+            dailyGoalTarget:
+              typeof parsed.gameState.profile.dailyGoalTarget === 'number'
+                ? parsed.gameState.profile.dailyGoalTarget
+                : 3,
+            attendanceDates: Array.isArray(parsed.gameState.profile.attendanceDates)
+              ? parsed.gameState.profile.attendanceDates
+              : [],
+            bookmarkedIds: Array.isArray(parsed.gameState.profile.bookmarkedIds)
+              ? parsed.gameState.profile.bookmarkedIds
+              : [],
+            equippedGearId:
+              typeof parsed.gameState.profile.equippedGearId === 'string' &&
+              parsed.gameState.profile.equippedGearId
+                ? parsed.gameState.profile.equippedGearId
+                : 'gear_1',
           },
           progressById: parsed.gameState.progressById ?? {},
           history: Array.isArray(parsed.gameState.history)

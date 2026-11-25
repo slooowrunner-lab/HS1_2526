@@ -1,6 +1,39 @@
 @import "tailwindcss";
 
+@theme {
+  --text-xs: 0.85rem;
+  --text-xs--line-height: 1.45;
+  --text-sm: 0.92rem;
+  --text-sm--line-height: 1.5;
+  --text-base: 1rem;
+  --text-base--line-height: 1.62;
+  --text-lg: 1.2rem;
+  --text-lg--line-height: 1.5;
+  --text-xl: 1.45rem;
+  --text-xl--line-height: 1.38;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 1.3;
+  --text-3xl: 2.1rem;
+  --text-3xl--line-height: 1.24;
+}
+
 @layer base {
+  html {
+    font-size: 13.33px; /* Exact 10pt baseline */
+  }
+
+  html[data-font-scale="md"] {
+    font-size: 13.33px; /* 10pt */
+  }
+
+  html[data-font-scale="lg"] {
+    font-size: 15.33px; /* 11.5pt */
+  }
+
+  html[data-font-scale="xl"] {
+    font-size: 17.33px; /* 13pt */
+  }
+
   :root {
     --rq-cream: #FFF9EF;
     --rq-paper: #FFFFFF;
@@ -16,9 +49,24 @@
     --rq-border: #E8DAC8;
 
     font-family: "Outfit", "Noto Sans KR", -apple-system, BlinkMacSystemFont, sans-serif;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    letter-spacing: -0.005em;
     color: var(--rq-ink);
     background-color: var(--rq-cream);
+  }
+
+  body {
+    font-size: 1rem;
+    line-height: 1.62;
+  }
+
+  h1, h2, .font-display {
+    font-family: "Jua", "Outfit", "Noto Sans KR", sans-serif;
+    letter-spacing: 0.01em;
+    text-wrap: balance;
+  }
+
+  h3, h4, button, input, textarea, select {
+    font-family: inherit;
   }
 
   code,
@@ -35,24 +83,28 @@
 /* Soft 3D Clay UI Surfaces */
 .clay-card {
   background-color: #FFFFFF;
-  border: 2px solid #EAE0D0;
-  box-shadow: 0 5px 0 rgba(155, 120, 93, 0.12), 0 10px 24px rgba(155, 120, 93, 0.08);
+  border: 1.5px solid #EAE0D0;
+  box-shadow: 0 4px 0 rgba(155, 120, 93, 0.1), 0 8px 20px rgba(155, 120, 93, 0.07);
 }
 
 .clay-card-soft {
   background-color: #FFFDF8;
-  border: 2px solid #EAE0D0;
-  box-shadow: 0 4px 0 rgba(155, 120, 93, 0.1);
+  border: 1.5px solid #EAE0D0;
+  box-shadow: 0 3px 0 rgba(155, 120, 93, 0.08);
 }
 
 .clay-btn {
-  border: 2px solid rgba(45, 38, 32, 0.12);
+  border: 1.5px solid rgba(45, 38, 32, 0.14);
   box-shadow: 0 4px 0 rgba(155, 120, 93, 0.2);
-  transition: transform 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 140ms cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 140ms ease,
+    filter 140ms ease;
 }
 
 .clay-btn:hover:not(:disabled) {
   transform: translateY(-1px);
+  filter: brightness(1.02);
   box-shadow: 0 5px 0 rgba(155, 120, 93, 0.24);
 }
 
@@ -168,6 +220,210 @@
 
 .rq-particle {
   animation: rq-particle-burst 680ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Workbook Page-Turn Motion Graphics (stage-to-stage & sub-page transitions) */
+@keyframes rq-page-turn-next {
+  0% {
+    opacity: 0.15;
+    transform: perspective(1600px) rotateY(-22deg) translateX(52px) scale(0.96);
+  }
+  58% {
+    opacity: 1;
+    transform: perspective(1600px) rotateY(2.2deg) translateX(-4px) scale(1.004);
+  }
+  100% {
+    opacity: 1;
+    transform: perspective(1600px) rotateY(0deg) translateX(0) scale(1);
+  }
+}
+
+@keyframes rq-page-turn-prev {
+  0% {
+    opacity: 0.15;
+    transform: perspective(1600px) rotateY(20deg) translateX(-52px) scale(0.96);
+  }
+  58% {
+    opacity: 1;
+    transform: perspective(1600px) rotateY(-1.8deg) translateX(4px) scale(1.004);
+  }
+  100% {
+    opacity: 1;
+    transform: perspective(1600px) rotateY(0deg) translateX(0) scale(1);
+  }
+}
+
+@keyframes rq-page-sheen {
+  0% {
+    opacity: 0.72;
+    transform: translateX(80%) skewX(-12deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-140%) skewX(-12deg);
+  }
+}
+
+@keyframes rq-page-fold-shadow {
+  0% {
+    opacity: 0.35;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-36px);
+  }
+}
+
+@keyframes rq-speech-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.93) translateX(-10px);
+  }
+  65% {
+    opacity: 1;
+    transform: scale(1.015) translateX(2px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateX(0);
+  }
+}
+
+@keyframes rq-feedback-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rq-fox-bob {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-4px) rotate(-1.5deg);
+  }
+}
+
+@keyframes rq-unlock-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+}
+
+@keyframes rq-progress-glint {
+  0% {
+    opacity: 0.2;
+    transform: translateX(-100%);
+  }
+  50% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 0.2;
+    transform: translateX(220%);
+  }
+}
+
+.rq-page-turn-next {
+  transform-origin: left center;
+  animation: rq-page-turn-next 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.rq-page-turn-prev {
+  transform-origin: right center;
+  animation: rq-page-turn-prev 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.rq-page-sheen {
+  animation: rq-page-sheen 540ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.rq-page-fold-shadow {
+  animation: rq-page-fold-shadow 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.rq-speech-pop {
+  animation: rq-speech-pop 380ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.rq-feedback-rise {
+  animation: rq-feedback-rise 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.rq-fox-bob {
+  animation: rq-fox-bob 3s ease-in-out infinite;
+}
+
+.rq-unlock-pulse {
+  animation: rq-unlock-pulse 1.5s ease-in-out infinite;
+}
+
+.rq-progress-glint {
+  animation: rq-progress-glint 2.4s ease-in-out infinite;
+}
+
+/* Tactile Duolingo-inspired 3D push buttons, speech bubbles, and progress gloss */
+.dq-btn-3d {
+  border-bottom-width: 4px;
+  transition: transform 0.14s cubic-bezier(0.16, 1, 0.3, 1),
+    filter 0.14s ease,
+    border-bottom-width 0.12s ease,
+    background-color 0.14s ease,
+    border-color 0.14s ease;
+}
+
+.dq-btn-3d:hover:not(:disabled) {
+  filter: brightness(1.025);
+}
+
+.dq-btn-3d:active:not(:disabled) {
+  transform: translateY(2px);
+  border-bottom-width: 2px;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid #1CB0F6;
+  outline-offset: 2px;
+}
+
+.dq-speech-bubble {
+  position: relative;
+}
+
+.dq-speech-bubble::before {
+  content: '';
+  position: absolute;
+  left: -10px;
+  top: 20px;
+  width: 0;
+  height: 0;
+  border-top: 8px solid transparent;
+  border-bottom: 8px solid transparent;
+  border-right: 10px solid #e5e5e5;
+}
+
+.dq-speech-bubble::after {
+  content: '';
+  position: absolute;
+  left: -7px;
+  top: 21px;
+  width: 0;
+  height: 0;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-right: 9px solid #ffffff;
 }
 
 /* Accessibility: Reduced Motion */

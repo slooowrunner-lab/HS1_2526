@@ -37,7 +37,7 @@ export const RewardAnimationController: React.FC<RewardAnimationControllerProps>
     <div
       role="status"
       aria-live="polite"
-      className="fixed bottom-20 right-4 z-50 max-w-sm w-[calc(100%-2rem)] sm:w-auto pointer-events-auto"
+      className="fixed bottom-24 right-4 z-50 max-w-sm w-[calc(100%-2rem)] sm:w-auto pointer-events-auto"
     >
       <div
         className={`relative clay-card rounded-3xl p-4 flex items-center gap-3.5 ${
@@ -87,11 +87,11 @@ export const RewardAnimationController: React.FC<RewardAnimationControllerProps>
             )}
             <span className="truncate">{event.title}</span>
           </div>
-          <p className="text-[11px] sm:text-xs font-semibold text-[#3E342C] mt-0.5 leading-snug">
+          <p className="text-xs font-semibold text-[#3E342C] mt-0.5 leading-snug">
             {event.subtitle}
           </p>
           {event.xpBonus && event.xpBonus > 0 ? (
-            <div className="text-[11px] font-mono font-extrabold text-[#1A4234] mt-1 tabular-nums">
+            <div className="text-xs font-mono font-extrabold text-[#1A4234] mt-1 tabular-nums">
               +{event.xpBonus} XP 획득!
             </div>
           ) : null}

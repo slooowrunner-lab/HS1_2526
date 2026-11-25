@@ -1,25 +1,32 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
+  ArrowRight,
   Award,
   BookOpen,
   Check,
+  Eye,
+  EyeOff,
   Gamepad2,
   Lock,
   RotateCcw,
   Search,
   Sparkles,
   Star,
+  Volume2,
+  X,
 } from 'lucide-react';
 import { ExtractedQuestion } from '../types/question';
 import { MissionProgress } from '../types/game';
 import { BADGE_CATALOG } from '../utils/gameStorage';
 import { playSuccessChime, playTryAgainSoft } from '../utils/soundEffects';
+import { speakEnglish } from '../utils/tts';
 import discoveryMuseumImg from '../assets/images/discovery_museum_badge_1795522643337.jpg';
 
 interface CollectiblesViewProps {
   questions: ExtractedQuestion[];
   progressById: Record<string, MissionProgress>;
   earnedBadgeIds: string[];
+  initialTab?: 'badges' | 'vocab' | 'quiz';
   onStartMission: (questionId: string) => void;
   onAwardQuizXp: (xpDelta: number) => void;
 }
@@ -59,24 +66,34 @@ export const CollectiblesView: React.FC<CollectiblesViewProps> = ({
   questions,
   progressById,
   earnedBadgeIds,
+  initialTab = 'badges',
   onStartMission,
   onAwardQuizXp,
 }) => {
-  const [subTab, setSubTab] = useState<'badges' | 'vocab' | 'quiz'>('badges');
+  const [subTab, setSubTab] = useState<'badges' | 'vocab' | 'quiz'>(initialTab);
   const [vocabQuery, setVocabQuery] = useState('');
+  const [vocabFilter, setVocabFilter] = useState<'all' | 'unlocked' | 'locked'>('all');
+  const [studyMode, setStudyMode] = useState(false);
+  const [revealedStudyKeys, setRevealedStudyKeys] = useState<string[]>([]);
   const [imgErr, setImgErr] = useState(false);
 
   // Mini Vocabulary Quiz State
+  const [quizScope, setQuizScope] = useState<'all' | 'focus'>('all');
   const [quizRoundSeed, setQuizRoundSeed] = useState(1);
   const [quizIndex, setQuizIndex] = useState(0);
   const [quizSelected, setQuizSelected] = useState<string | null>(null);
   const [quizScore, setQuizScore] = useState(0);
 
-  const collectedWords = useMemo(() => {
+  useEffect(() => {
+    setSubTab(initialTab);
+  }, [initialTab]);
+
+  const allVocabRows = useMemo(() => {
     const rows: {
       term: string;
       meaning: string;
       sourceExam: string;
+      topicSummary: string;
       questionId: string;
       unlocked: boolean;
     }[] = [];
@@ -90,14 +107,21 @@ export const CollectiblesView: React.FC<CollectiblesViewProps> = ({
           term: fn.term,
           meaning: fn.meaning,
           sourceExam: q.sourceExam,
+          topicSummary: q.topicSummary,
           questionId: q.id,
           unlocked,
         });
       });
     });
 
+    return rows;
+  }, [questions, progressById]);
+
+  const collectedWords = useMemo(() => {
     const query = vocabQuery.trim().toLowerCase();
-    return rows.filter((r) => {
+    return allVocabRows.filter((r) => {
+      if (vocabFilter === 'unlocked' && !r.unlocked) return false;
+      if (vocabFilter === 'locked' && r.unlocked) return false;
       if (!query) return true;
       return (
         r.term.toLowerCase().includes(query) ||
@@ -105,17 +129,26 @@ export const CollectiblesView: React.FC<CollectiblesViewProps> = ({
         r.sourceExam.toLowerCase().includes(query)
       );
     });
-  }, [questions, progressById, vocabQuery]);
+  }, [allVocabRows, vocabQuery, vocabFilter]);
 
-  const unlockedWordCount = collectedWords.filter((w) => w.unlocked).length;
+  const unlockedWordCount = allVocabRows.filter((w) => w.unlocked).length;
 
-  // Build 5-question vocabulary quiz deck (prefers unlocked words, falls back to full deck if < 4 unlocked)
+  // Build 5-question vocabulary quiz deck (supports full/unlocked pool or focus on missed/clue-opened problems)
   const quizDeck = useMemo(() => {
-    const allVocab = collectedWords.filter(
+    const allVocab = allVocabRows.filter(
       (w, idx, arr) => arr.findIndex((x) => x.term === w.term) === idx,
     );
+    const focusPool = allVocab.filter((w) => {
+      const p = progressById[w.questionId];
+      return Boolean(w.unlocked || (p && (p.attempts > 0 && !p.completed)));
+    });
     const unlockedPool = allVocab.filter((w) => w.unlocked);
-    const pool = unlockedPool.length >= 4 ? unlockedPool : allVocab;
+    const pool =
+      quizScope === 'focus' && focusPool.length >= 4
+        ? focusPool
+        : unlockedPool.length >= 4
+          ? unlockedPool
+          : allVocab;
     if (pool.length < 4) return [];
 
     const picked: typeof allVocab = [];
@@ -140,10 +173,11 @@ export const CollectiblesView: React.FC<CollectiblesViewProps> = ({
         term: target.term,
         correctMeaning: target.meaning,
         sourceExam: target.sourceExam,
+        topicSummary: target.topicSummary,
         options: rotated,
       };
     });
-  }, [collectedWords, quizRoundSeed]);
+  }, [allVocabRows, progressById, quizRoundSeed, quizScope]);
 
   const activeQuizItem = quizDeck[quizIndex];
   const quizFinished = quizDeck.length > 0 && quizIndex >= quizDeck.length;
@@ -181,48 +215,48 @@ export const CollectiblesView: React.FC<CollectiblesViewProps> = ({
             MY COLLECTIBLES MUSEUM
           </div>
           <h1 className="text-xl sm:text-2xl font-extrabold text-[#2D2620]">
-            나의 탐정 수집품 & 어휘 퀴즈
+            나의 배지 & 어휘 학습관
           </h1>
           <p className="text-xs sm:text-sm text-[#5C4D42]">
             배지 {earnedBadgeIds.length} / {BADGE_CATALOG.length}개 · 수집한 각주
             영단어 {unlockedWordCount}개를 복습하고 퀴즈로 XP를 모아보세요.
           </p>
 
-          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-1">
+          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2.5 pt-1">
             <button
               type="button"
               onClick={() => setSubTab('badges')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold border-2 inline-flex items-center gap-1.5 cursor-pointer ${
+              className={`dq-btn-3d min-h-[44px] px-4 py-2 rounded-2xl text-xs sm:text-sm font-extrabold border-2 inline-flex items-center gap-1.5 cursor-pointer ${
                 subTab === 'badges'
                   ? 'bg-[#FFE18A] border-[#C9961A] text-[#2D2620]'
                   : 'bg-[#FFF9EF] border-[#EAE0D0] text-[#5C4D42]'
               }`}
             >
-              <Award className="w-3.5 h-3.5" />
+              <Award className="w-4 h-4" />
               <span>모험 배지</span>
             </button>
             <button
               type="button"
               onClick={() => setSubTab('vocab')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold border-2 inline-flex items-center gap-1.5 cursor-pointer ${
+              className={`dq-btn-3d min-h-[44px] px-4 py-2 rounded-2xl text-xs sm:text-sm font-extrabold border-2 inline-flex items-center gap-1.5 cursor-pointer ${
                 subTab === 'vocab'
                   ? 'bg-[#A8DCC8] border-[#4D9479] text-[#163B2D]'
                   : 'bg-[#FFF9EF] border-[#EAE0D0] text-[#5C4D42]'
               }`}
             >
-              <BookOpen className="w-3.5 h-3.5" />
+              <BookOpen className="w-4 h-4" />
               <span>어휘 단서 도감</span>
             </button>
             <button
               type="button"
               onClick={() => setSubTab('quiz')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold border-2 inline-flex items-center gap-1.5 cursor-pointer ${
+              className={`dq-btn-3d min-h-[44px] px-4 py-2 rounded-2xl text-xs sm:text-sm font-extrabold border-2 inline-flex items-center gap-1.5 cursor-pointer ${
                 subTab === 'quiz'
                   ? 'bg-[#C9B9E8] border-[#7963A8] text-[#2E204D]'
                   : 'bg-[#FFF9EF] border-[#EAE0D0] text-[#5C4D42]'
               }`}
             >
-              <Gamepad2 className="w-3.5 h-3.5" />
+              <Gamepad2 className="w-4 h-4" />
               <span>어휘 미니 퀴즈 (+XP)</span>
             </button>
           </div>
@@ -278,7 +312,7 @@ export const CollectiblesView: React.FC<CollectiblesViewProps> = ({
                     <p className="text-xs text-[#5C4D42] mt-0.5 leading-snug">
                       {badge.subtitle}
                     </p>
-                    <div className="text-[11px] font-bold mt-1.5 text-[#7D6E61]">
+                    <div className="text-xs font-bold mt-1.5 text-[#7D6E61]">
                       {isEarned ? '획득 완료' : '미획득'}
                     </div>
                   </div>
@@ -293,9 +327,14 @@ export const CollectiblesView: React.FC<CollectiblesViewProps> = ({
       {subTab === 'vocab' && (
         <section className="clay-card rounded-3xl p-5 sm:p-6 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-extrabold text-[#2D2620]">
-              수집한 어휘 단서 도감
-            </h2>
+            <div>
+              <h2 className="text-lg sm:text-xl font-extrabold text-[#2D2620]">
+                수집한 어휘 단서 도감
+              </h2>
+              <p className="text-xs sm:text-sm text-[#6E5E52]">
+                전체 {allVocabRows.length}개 중 {unlockedWordCount}개 수집 완료
+              </p>
+            </div>
             <div className="relative w-full sm:w-64">
               <Search className="w-4 h-4 text-[#9B785D] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
@@ -304,35 +343,142 @@ export const CollectiblesView: React.FC<CollectiblesViewProps> = ({
                 onChange={(e) => setVocabQuery(e.target.value)}
                 placeholder="영단어 · 뜻 · 출처 검색"
                 aria-label="어휘 도감 검색"
-                className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-[#FFF9EF] border-2 border-[#EAE0D0] rounded-xl text-[#2D2620] focus:outline-none focus:border-[#9B785D]"
+                className="w-full min-h-[44px] pl-9 pr-9 py-2 text-sm bg-[#FFF9EF] border-2 border-[#EAE0D0] rounded-2xl text-[#2D2620] focus:outline-none focus:border-[#1CB0F6]"
               />
+              {vocabQuery.trim() !== '' && (
+                <button
+                  type="button"
+                  onClick={() => setVocabQuery('')}
+                  aria-label="검색어 지우기"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-[#EFE6D6] text-[#6E5E52] hover:bg-[#E2D6C0] flex items-center justify-center cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           </div>
 
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              {(
+                [
+                  { id: 'all', label: `전체 (${allVocabRows.length})` },
+                  { id: 'unlocked', label: `수집됨 (${unlockedWordCount})` },
+                  {
+                    id: 'locked',
+                    label: `미수집 (${allVocabRows.length - unlockedWordCount})`,
+                  },
+                ] as const
+              ).map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setVocabFilter(f.id)}
+                  className={`min-h-[40px] px-3.5 py-1.5 rounded-xl border-2 text-xs sm:text-sm font-extrabold cursor-pointer transition-colors ${
+                    vocabFilter === f.id
+                      ? 'bg-[#A8DCC8] border-[#4D9479] text-[#163B2D]'
+                      : 'bg-[#FFF9EF] border-[#EAE0D0] text-[#5C4D42] hover:border-[#9B785D]'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setStudyMode((prev) => !prev);
+                setRevealedStudyKeys([]);
+              }}
+              className={`dq-btn-3d min-h-[40px] px-4 py-1.5 rounded-xl border-2 text-xs sm:text-sm font-extrabold inline-flex items-center gap-1.5 cursor-pointer ${
+                studyMode
+                  ? 'bg-[#FFE18A] border-[#C9961A] text-[#2D2620]'
+                  : 'bg-white border-[#EAE0D0] text-[#5C4D42]'
+              }`}
+            >
+              {studyMode ? (
+                <EyeOff className="w-4 h-4" />
+              ) : (
+                <Eye className="w-4 h-4" />
+              )}
+              <span>{studyMode ? '암기 모드 켜짐 (뜻 가리기)' : '암기 모드 (뜻 가리기)'}</span>
+            </button>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {collectedWords.map((item, idx) => (
-              <button
-                key={`${item.questionId}-${item.term}-${idx}`}
-                type="button"
-                onClick={() => onStartMission(item.questionId)}
-                className={`text-left rounded-2xl border-2 p-3.5 transition-all cursor-pointer ${
-                  item.unlocked
-                    ? 'bg-[#FFF9EF] border-[#EAE0D0] hover:border-[#9B785D]'
-                    : 'bg-[#F5EFE6] border-[#E3DACB] opacity-75 hover:opacity-100'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2 text-[11px] font-bold text-[#9B785D]">
-                  <span>{item.sourceExam}</span>
-                  <span>{item.unlocked ? '수집됨' : '미수집'}</span>
+            {collectedWords.map((item, idx) => {
+              const cardKey = `${item.questionId}-${item.term}-${idx}`;
+              const isStudyRevealed = revealedStudyKeys.includes(cardKey);
+              const hideMeaning = studyMode && item.unlocked && !isStudyRevealed;
+
+              return (
+                <div
+                  key={cardKey}
+                  className={`rounded-2xl border-2 p-4 flex flex-col justify-between gap-3 transition-all ${
+                    item.unlocked
+                      ? 'bg-[#FFF9EF] border-[#DFD2BE]'
+                      : 'bg-[#F5EFE6] border-[#E3DACB] opacity-85'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2 text-xs font-bold text-[#9B785D]">
+                      <span>{item.sourceExam}</span>
+                      <span
+                        className={
+                          item.unlocked ? 'text-[#4C7A34]' : 'text-[#8B7F73]'
+                        }
+                      >
+                        {item.unlocked ? '수집됨' : '미수집'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 mt-1.5">
+                      <div className="text-lg font-mono font-extrabold text-[#2D2620]">
+                        {item.term}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => speakEnglish(item.term, 0.9)}
+                        aria-label={`${item.term} 발음 듣기`}
+                        className="min-w-[36px] min-h-[36px] px-2.5 rounded-xl bg-white border-2 border-[#DFD2BE] hover:border-[#1CB0F6] text-[#1C7CB5] inline-flex items-center justify-center gap-1 text-xs font-extrabold cursor-pointer shrink-0"
+                      >
+                        <Volume2 className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {hideMeaning ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setRevealedStudyKeys((prev) => [...prev, cardKey])
+                        }
+                        className="mt-2 w-full min-h-[40px] px-3 py-1.5 rounded-xl border-2 border-dashed border-[#C9961A] bg-[#FFF8DF] text-xs sm:text-sm font-extrabold text-[#6B4A00] cursor-pointer"
+                      >
+                        터치해서 뜻 확인하기
+                      </button>
+                    ) : (
+                      <div className="text-sm text-[#5C4D42] mt-1 font-medium">
+                        {item.unlocked
+                          ? item.meaning
+                          : '단서 탐색에서 열어볼 수 있어요'}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-2 border-t border-[#EFE6D6] flex items-center justify-end">
+                    <button
+                      type="button"
+                      onClick={() => onStartMission(item.questionId)}
+                      className="min-h-[36px] px-3 py-1 rounded-xl bg-white border border-[#DFD2BE] hover:border-[#9B785D] text-xs font-extrabold text-[#5C4D42] inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>문제 풀기</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
-                <div className="text-sm font-mono font-extrabold text-[#2D2620] mt-1">
-                  {item.term}
-                </div>
-                <div className="text-xs text-[#5C4D42] mt-0.5">
-                  {item.unlocked ? item.meaning : '단서 탐색에서 열어볼 수 있어요'}
-                </div>
-              </button>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}
@@ -361,7 +507,7 @@ export const CollectiblesView: React.FC<CollectiblesViewProps> = ({
                   setQuizSelected(null);
                   setQuizScore(0);
                 }}
-                className="clay-btn px-5 py-2.5 rounded-xl bg-[#A8DCC8] text-sm font-extrabold text-[#163B2D] inline-flex items-center gap-2 cursor-pointer"
+                className="dq-btn-3d min-h-[46px] px-6 py-2.5 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-sm font-extrabold text-white inline-flex items-center gap-2 cursor-pointer"
               >
                 <RotateCcw className="w-4 h-4" />
                 <span>새 단어 세트로 다시 도전</span>
@@ -369,20 +515,95 @@ export const CollectiblesView: React.FC<CollectiblesViewProps> = ({
             </div>
           ) : activeQuizItem ? (
             <>
-              <div className="flex items-center justify-between gap-2 text-xs font-bold text-[#9B785D] tabular-nums">
-                <span>
-                  어휘 퀴즈 {quizIndex + 1} / {quizDeck.length} ·{' '}
-                  {activeQuizItem.sourceExam}
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-1">
+                <div className="inline-flex items-center gap-1.5 bg-[#F5EFE4] p-1 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuizScope('all');
+                      setQuizIndex(0);
+                      setQuizSelected(null);
+                      setQuizScore(0);
+                    }}
+                    className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-extrabold cursor-pointer transition-colors ${
+                      quizScope === 'all'
+                        ? 'bg-white text-[#2D2620] shadow-xs'
+                        : 'text-[#5C4D42] hover:text-[#2D2620]'
+                    }`}
+                  >
+                    전체 핵심 어휘
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuizScope('focus');
+                      setQuizIndex(0);
+                      setQuizSelected(null);
+                      setQuizScore(0);
+                    }}
+                    className={`min-h-[34px] px-3 py-1 rounded-lg text-xs font-extrabold cursor-pointer transition-colors ${
+                      quizScope === 'focus'
+                        ? 'bg-white text-[#2D2620] shadow-xs'
+                        : 'text-[#5C4D42] hover:text-[#2D2620]'
+                    }`}
+                  >
+                    내가 본 단서 집중
+                  </button>
+                </div>
+                <span className="text-xs font-bold text-[#6E5E52]">
+                  맞힐 때마다 +5 XP
                 </span>
-                <span>맞힌 개수: {quizScore}</span>
               </div>
 
-              <div className="rounded-2xl bg-[#FFF9EF] border-2 border-[#EAE0D0] p-6 text-center">
-                <div className="text-xs font-bold text-[#6E5E52]">
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between gap-2 text-xs font-extrabold text-[#9B785D] tabular-nums">
+                  <span>
+                    어휘 퀴즈 {quizIndex + 1} / {quizDeck.length} ·{' '}
+                    {activeQuizItem.sourceExam}
+                  </span>
+                  <span className="text-[#4C7A34]">맞힌 개수: {quizScore}</span>
+                </div>
+                <div className="h-3.5 bg-[#EFECE5] rounded-full overflow-hidden border border-[#E2DACB]">
+                  <div
+                    className="h-full bg-[#58CC02] rounded-full transition-all duration-300 relative overflow-hidden"
+                    style={{
+                      width: `${Math.round(
+                        ((quizIndex + (quizSelected !== null ? 1 : 0)) /
+                          quizDeck.length) *
+                          100,
+                      )}%`,
+                    }}
+                  >
+                    <div className="h-1 bg-white/35 rounded-full mx-1.5 mt-0.5" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-[#FFF9EF] border-2 border-[#EAE0D0] p-6 text-center space-y-2.5">
+                <div className="text-xs sm:text-sm font-bold text-[#6E5E52]">
                   다음 영어 단어의 뜻으로 알맞은 것은?
                 </div>
-                <div className="text-2xl sm:text-3xl font-mono font-extrabold text-[#2D2620] mt-2">
-                  {activeQuizItem.term}
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <div className="text-2xl sm:text-3xl font-mono font-extrabold text-[#2D2620]">
+                    {activeQuizItem.term}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => speakEnglish(activeQuizItem.term, 0.94)}
+                    aria-label={`${activeQuizItem.term} 발음 듣기`}
+                    className="min-h-[38px] px-3 py-1.5 rounded-xl bg-white border-2 border-[#DFD2BE] hover:border-[#1CB0F6] text-[#1C7CB5] inline-flex items-center gap-1 text-xs font-extrabold cursor-pointer"
+                  >
+                    <Volume2 className="w-4 h-4" />
+                    <span>발음</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => speakEnglish(activeQuizItem.term, 0.78)}
+                    title="0.8배속 천천히 듣기"
+                    className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-white border-2 border-[#DFD2BE] hover:border-[#1CB0F6] text-[#1C7CB5] text-xs font-extrabold cursor-pointer"
+                  >
+                    0.8x
+                  </button>
                 </div>
               </div>
 
@@ -393,24 +614,28 @@ export const CollectiblesView: React.FC<CollectiblesViewProps> = ({
                   const revealed = quizSelected !== null;
 
                   let cls =
-                    'bg-white border-[#EAE0D0] hover:border-[#9B785D] text-[#2D2620]';
+                    'bg-white border-[#DFD2BE] hover:border-[#9B785D] text-[#2D2620]';
                   if (revealed && isCorrect) {
                     cls =
-                      'bg-[#9BCB83]/25 border-[#5D8A43] text-[#1A3110] font-bold';
+                      'bg-[#D7FFB8] border-[#58CC02] text-[#1A4205] font-extrabold';
                   } else if (isChosen && !isCorrect) {
-                    cls = 'bg-[#F39A83]/25 border-[#D1684E] text-[#4A1E13]';
+                    cls = 'bg-[#FFDFE0] border-[#FF4B4B] text-[#7A1B1B] font-bold';
                   }
 
                   return (
                     <button
                       key={opt}
                       type="button"
+                      disabled={revealed}
                       onClick={() => handleSelectQuizOption(opt)}
-                      className={`p-4 rounded-2xl border-2 text-sm font-semibold text-left flex items-center justify-between gap-2 cursor-pointer ${cls}`}
+                      className={`dq-btn-3d min-h-[54px] p-4 rounded-2xl border-2 text-sm sm:text-base font-bold text-left flex items-center justify-between gap-2 cursor-pointer disabled:cursor-default ${cls}`}
                     >
                       <span>{opt}</span>
                       {revealed && isCorrect && (
-                        <Check className="w-4 h-4 text-[#4C7A34] shrink-0" />
+                        <Check className="w-5 h-5 text-[#46A302] shrink-0" />
+                      )}
+                      {revealed && isChosen && !isCorrect && (
+                        <X className="w-5 h-5 text-[#EA2B2B] shrink-0" />
                       )}
                     </button>
                   );
@@ -418,17 +643,36 @@ export const CollectiblesView: React.FC<CollectiblesViewProps> = ({
               </div>
 
               {quizSelected !== null && (
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setQuizIndex((i) => i + 1);
-                      setQuizSelected(null);
-                    }}
-                    className="clay-btn px-5 py-2.5 rounded-xl bg-[#FFE18A] text-sm font-extrabold text-[#2D2620] cursor-pointer"
-                  >
-                    {quizIndex + 1 >= quizDeck.length ? '결과 보기' : '다음 단어'}
-                  </button>
+                <div className="rq-feedback-rise space-y-2.5 pt-1">
+                  <div className="rounded-xl bg-[#FAF6EE] border border-[#EAE0D0] px-3.5 py-2.5 text-xs sm:text-sm text-[#5C4D42]">
+                    <span className="font-extrabold text-[#9B785D] mr-1.5">
+                      지문 맥락 ({activeQuizItem.sourceExam}):
+                    </span>
+                    {activeQuizItem.topicSummary}
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div
+                      className={`text-sm font-extrabold ${
+                        quizSelected === activeQuizItem.correctMeaning
+                          ? 'text-[#46A302]'
+                          : 'text-[#C25D44]'
+                      }`}
+                    >
+                      {quizSelected === activeQuizItem.correctMeaning
+                        ? '정답이에요! (+5 XP)'
+                        : `정답은 "${activeQuizItem.correctMeaning}"이에요.`}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuizIndex((i) => i + 1);
+                        setQuizSelected(null);
+                      }}
+                      className="dq-btn-3d min-h-[46px] px-6 py-2.5 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-sm font-extrabold text-white cursor-pointer shrink-0"
+                    >
+                      {quizIndex + 1 >= quizDeck.length ? '결과 보기' : '다음 단어'}
+                    </button>
+                  </div>
                 </div>
               )}
             </>

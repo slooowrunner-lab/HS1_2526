@@ -6,6 +6,7 @@ import {
   Compass,
   Edit3,
   Flame,
+  HelpCircle,
   Lock,
   Map as MapIcon,
   Music,
@@ -19,6 +20,7 @@ import {
 import { EXTRACTED_QUESTIONS } from './data/questions';
 import { ExamYear, ExtractedQuestion } from './types/question';
 import {
+  FontScaleMode,
   HistoryEvent,
   LearningStage,
   MissionProgress,
@@ -26,7 +28,6 @@ import {
 } from './types/game';
 import {
   BADGE_CATALOG,
-  DAILY_QUEST_CATALOG,
   computeEarnedStars,
   computeLevelInfo,
   computeNodeStatusMap,
@@ -34,7 +35,9 @@ import {
   createEmptyProgress,
   createInitialGameState,
   evaluateEarnedBadges,
+  formatItemNumber,
   getComboBonusXp,
+  getDailyQuestCatalog,
   getTodayDateKey,
   loadGameState,
   saveGameState,
@@ -53,6 +56,7 @@ import { ReviewMissionsView } from './components/ReviewMissionsView';
 import { TeacherAdminView } from './components/TeacherAdminView';
 import { ZoneBossModal } from './components/ZoneBossModal';
 import { WelcomeOnboardingModal } from './components/WelcomeOnboardingModal';
+import { FloatingToolkit } from './components/FloatingToolkit';
 import {
   AudioManager,
   AudioSettings,
@@ -83,6 +87,7 @@ const PRE_RESET_BACKUP_KEY = 'reading_quest_pre_reset_backup_v1';
 
 export default function App() {
   const [activeView, setActiveView] = useState<ActiveView>('map');
+  const [collectiblesTab, setCollectiblesTab] = useState<'badges' | 'vocab' | 'quiz'>('badges');
   const [reviewHistoryTab, setReviewHistoryTab] = useState<'review' | 'history'>('review');
   const [selectedQuestionId, setSelectedQuestionId] = useState<string>(
     EXTRACTED_QUESTIONS[0].id,
@@ -110,6 +115,7 @@ export default function App() {
     () => loadGameState().profile.nickname,
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
   const [teacherUnlocked, setTeacherUnlocked] = useState(false);
 
   const [bossSession, setBossSession] = useState<{
@@ -120,6 +126,7 @@ export default function App() {
   } | null>(null);
 
   const [newlyUnlockedBadges, setNewlyUnlockedBadges] = useState<string[]>([]);
+  const [lastDailyBonusXp, setLastDailyBonusXp] = useState(0);
   const [toastNotification, setToastNotification] = useState<{
     title: string;
     subtitle: string;
@@ -149,6 +156,11 @@ export default function App() {
   useEffect(() => {
     saveGameState(gameState);
   }, [gameState]);
+
+  useEffect(() => {
+    document.documentElement.dataset.fontScale =
+      gameState.profile.fontScale ?? 'md';
+  }, [gameState.profile.fontScale]);
 
   useEffect(() => {
     saveCollectedObjects(collectedMapObjects);
@@ -238,7 +250,7 @@ export default function App() {
         id: `lvl-${levelInfo.level}-${Date.now()}`,
         kind: 'level_up',
         title: `레벨 업! LV.${levelInfo.level} ${levelInfo.title}`,
-        subtitle: `새 탐정 장비 "${levelInfo.gearName}"을(를) 얻었어요!`,
+        subtitle: `새 학습 아이템 "${levelInfo.gearName}"을(를) 얻었어요!`,
       });
     }
     prevLevelRef.current = levelInfo.level;
@@ -295,6 +307,11 @@ export default function App() {
     return null;
   }, [currentQuestion]);
 
+  const nextMissionLabel = useMemo(() => {
+    if (!nextMissionOnSameIsland) return undefined;
+    return `${nextMissionOnSameIsland.examYear}년 ${formatItemNumber(nextMissionOnSameIsland.originalItemNumber)}`;
+  }, [nextMissionOnSameIsland]);
+
   const applyStateUpdate = (
     updater: (prev: QuestGameState) => QuestGameState,
   ) => {
@@ -310,30 +327,41 @@ export default function App() {
           ? { ...next.dailyQuest }
           : createEmptyDailyQuest(today);
 
+      const questCatalog = getDailyQuestCatalog(next.profile.dailyGoalTarget ?? 3);
       let dailyBonusXp = 0;
       const claimed = new Set(dq.claimedRewardIds);
 
       if (
-        dq.solvedTodayIds.length >= DAILY_QUEST_CATALOG[0].target &&
-        !claimed.has(DAILY_QUEST_CATALOG[0].id)
+        dq.solvedTodayIds.length >= questCatalog[0].target &&
+        !claimed.has(questCatalog[0].id)
       ) {
-        claimed.add(DAILY_QUEST_CATALOG[0].id);
-        dailyBonusXp += DAILY_QUEST_CATALOG[0].xpReward;
+        claimed.add(questCatalog[0].id);
+        dailyBonusXp += questCatalog[0].xpReward;
       }
       if (
-        dq.cluesTodayCount >= DAILY_QUEST_CATALOG[1].target &&
-        !claimed.has(DAILY_QUEST_CATALOG[1].id)
+        dq.cluesTodayCount >= questCatalog[1].target &&
+        !claimed.has(questCatalog[1].id)
       ) {
-        claimed.add(DAILY_QUEST_CATALOG[1].id);
-        dailyBonusXp += DAILY_QUEST_CATALOG[1].xpReward;
+        claimed.add(questCatalog[1].id);
+        dailyBonusXp += questCatalog[1].xpReward;
       }
       if (
-        dq.threePtSolvedTodayIds.length >= DAILY_QUEST_CATALOG[2].target &&
-        !claimed.has(DAILY_QUEST_CATALOG[2].id)
+        dq.threePtSolvedTodayIds.length >= questCatalog[2].target &&
+        !claimed.has(questCatalog[2].id)
       ) {
-        claimed.add(DAILY_QUEST_CATALOG[2].id);
-        dailyBonusXp += DAILY_QUEST_CATALOG[2].xpReward;
+        claimed.add(questCatalog[2].id);
+        dailyBonusXp += questCatalog[2].xpReward;
       }
+
+      const prevAttendance = next.profile.attendanceDates ?? [];
+      const madeLearningActivity =
+        dq.cluesTodayCount > prev.dailyQuest.cluesTodayCount ||
+        dq.solvedTodayIds.length > prev.dailyQuest.solvedTodayIds.length ||
+        next.profile.xp > prev.profile.xp;
+      const nextAttendance =
+        madeLearningActivity && !prevAttendance.includes(today)
+          ? [...prevAttendance, today]
+          : prevAttendance;
 
       if (dailyBonusXp > 0) {
         dq = { ...dq, claimedRewardIds: Array.from(claimed) };
@@ -342,15 +370,26 @@ export default function App() {
           profile: {
             ...next.profile,
             xp: next.profile.xp + dailyBonusXp,
+            attendanceDates: nextAttendance,
           },
           dailyQuest: dq,
         };
-        setToastNotification({
-          title: '오늘의 탐험 퀘스트 달성!',
-          subtitle: `보너스 +${dailyBonusXp} XP를 획득했어요!`,
-        });
+        setLastDailyBonusXp((prevBonus) => prevBonus + dailyBonusXp);
+        if (activeView !== 'workspace') {
+          setToastNotification({
+            title: '오늘의 탐험 퀘스트 달성!',
+            subtitle: `보너스 +${dailyBonusXp} XP를 획득했어요!`,
+          });
+        }
       } else {
-        next = { ...next, dailyQuest: dq };
+        next = {
+          ...next,
+          profile: {
+            ...next.profile,
+            attendanceDates: nextAttendance,
+          },
+          dailyQuest: dq,
+        };
       }
 
       const afterBadges = evaluateEarnedBadges(next, EXTRACTED_QUESTIONS);
@@ -360,10 +399,12 @@ export default function App() {
           .map((id) => BADGE_CATALOG.find((b) => b.id === id)?.title)
           .filter((t): t is string => Boolean(t));
         setNewlyUnlockedBadges(titles);
-        setToastNotification({
-          title: `새 배지 획득: ${titles[0]}`,
-          subtitle: '수집품 박물관에 멋지게 진열되었어요!',
-        });
+        if (activeView !== 'workspace') {
+          setToastNotification({
+            title: `새 배지 획득: ${titles[0]}`,
+            subtitle: '수집품 박물관에 멋지게 진열되었어요!',
+          });
+        }
         playBadgeFanfare(next.profile.soundEnabled);
       }
 
@@ -386,6 +427,7 @@ export default function App() {
       setActiveMapIsland(missionQuestion.examYear);
     }
     setNewlyUnlockedBadges([]);
+    setLastDailyBonusXp(0);
     applyStateUpdate((prev) => {
       const existing =
         prev.progressById[questionId] ?? createEmptyProgress(questionId);
@@ -735,8 +777,8 @@ export default function App() {
         isCorrect,
         xpDelta: xpGain,
         note: isCorrect
-          ? `보스 타임어택 정답 (${choiceIdx}번)`
-          : `보스 타임어택 오답 (${choiceIdx}번)`,
+          ? `실전 미니테스트 정답 (${choiceIdx}번)`
+          : `실전 미니테스트 오답 (${choiceIdx}번)`,
       };
 
       return {
@@ -780,7 +822,7 @@ export default function App() {
       },
     }));
     setToastNotification({
-      title: '구역 보스 정복 완료!',
+      title: '실전 미니테스트 통과!',
       subtitle: `왕관 깃발과 보너스 +${bonusXp} XP를 획득했어요!`,
     });
   };
@@ -847,7 +889,7 @@ export default function App() {
   };
 
   const handleSaveNickname = () => {
-    const clean = nicknameDraft.trim() || '꼬마 탐정';
+    const clean = nicknameDraft.trim() || '영어 탐험가';
     setNicknameDraft(clean);
     setEditingNickname(false);
     applyStateUpdate((prev) => ({
@@ -855,6 +897,16 @@ export default function App() {
       profile: {
         ...prev.profile,
         nickname: clean,
+      },
+    }));
+  };
+
+  const handleChangeFontScale = (nextScale: FontScaleMode) => {
+    applyStateUpdate((prev) => ({
+      ...prev,
+      profile: {
+        ...prev.profile,
+        fontScale: nextScale,
       },
     }));
   };
@@ -873,19 +925,63 @@ export default function App() {
   const handleCompleteOnboarding = (
     nickname: string,
     startImmediately: boolean,
+    preferredYear?: ExamYear,
+    dailyGoal?: number,
   ) => {
     setNicknameDraft(nickname);
+    if (preferredYear) {
+      setActiveMapIsland(preferredYear);
+    }
     applyStateUpdate((prev) => ({
       ...prev,
       profile: {
         ...prev.profile,
         nickname,
         onboarded: true,
+        dailyGoalTarget: dailyGoal ?? prev.profile.dailyGoalTarget ?? 3,
       },
     }));
     if (startImmediately) {
-      handleContinueLearning();
+      if (preferredYear) {
+        const islandFirst =
+          EXTRACTED_QUESTIONS.find(
+            (q) =>
+              q.examYear === preferredYear &&
+              !gameState.progressById[q.id]?.completed,
+          ) ??
+          EXTRACTED_QUESTIONS.find((q) => q.examYear === preferredYear) ??
+          EXTRACTED_QUESTIONS[0];
+        handleStartMission(islandFirst.id);
+      } else {
+        handleContinueLearning();
+      }
     }
+  };
+
+  const handleToggleBookmark = (questionId: string) => {
+    applyStateUpdate((prev) => {
+      const existing = prev.profile.bookmarkedIds ?? [];
+      const has = existing.includes(questionId);
+      return {
+        ...prev,
+        profile: {
+          ...prev.profile,
+          bookmarkedIds: has
+            ? existing.filter((id) => id !== questionId)
+            : [...existing, questionId],
+        },
+      };
+    });
+  };
+
+  const handleEquipGear = (gearId: string) => {
+    applyStateUpdate((prev) => ({
+      ...prev,
+      profile: {
+        ...prev.profile,
+        equippedGearId: gearId,
+      },
+    }));
   };
 
   const completedTotal = useMemo(
@@ -906,14 +1002,15 @@ export default function App() {
           : 'bg-[#FFF9EF] text-[#2D2620]'
       } ${gameState.profile.reducedMotion ? 'reduced-motion' : ''}`}
     >
-      {/* Top Cozy Adventure HUD */}
-      <header
-        className={`sticky top-0 z-30 backdrop-blur-xs border-b-2 px-4 lg:px-8 py-2.5 transition-colors duration-300 ${
-          isLavenderTheme
-            ? 'bg-[#F9F9FF]/95 border-[#C9C2E8]'
-            : 'bg-[#FFFDF8]/95 border-[#EAE0D0]'
-        }`}
-      >
+      {/* Top Cozy Adventure HUD (Hidden during Focus Lesson Mode in Workspace) */}
+      {activeView !== 'workspace' && (
+        <header
+          className={`sticky top-0 z-30 backdrop-blur-xs border-b-2 px-4 lg:px-8 py-2.5 transition-colors duration-300 ${
+            isLavenderTheme
+              ? 'bg-[#F9F9FF]/95 border-[#C9C2E8]'
+              : 'bg-[#FFFDF8]/95 border-[#EAE0D0]'
+          }`}
+        >
         <div className="max-w-[1440px] mx-auto flex flex-wrap items-center justify-between gap-3">
           <button
             type="button"
@@ -942,7 +1039,7 @@ export default function App() {
                 READING QUEST
               </div>
               <div
-                className={`text-[11px] font-semibold mt-0.5 ${
+                className={`text-xs font-semibold mt-0.5 ${
                   isLavenderTheme ? 'text-[#5A598A]' : 'text-[#7D6E61]'
                 }`}
               >
@@ -951,15 +1048,23 @@ export default function App() {
             </div>
           </button>
 
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3 relative">
-            <div className="flex items-center gap-2 bg-white border-2 border-[#EAE0D0] rounded-2xl px-2.5 py-1.5">
-              <div className="w-7 h-7 rounded-xl overflow-hidden bg-[#FFF9EF] border border-[#EAE0D0] shrink-0 flex items-center justify-center">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 relative">
+            <div
+              className={`flex items-center gap-2 bg-white border-2 rounded-2xl px-3 min-h-[42px] ${
+                isLavenderTheme ? 'border-[#C9C2E8]' : 'border-[#EAE0D0]'
+              }`}
+            >
+              <div
+                className={`w-7 h-7 rounded-xl overflow-hidden bg-[#FFF9EF] border shrink-0 flex items-center justify-center ${
+                  isLavenderTheme ? 'border-[#C9C2E8]' : 'border-[#EAE0D0]'
+                }`}
+              >
                 {avatarImgErr ? (
                   <Sparkles className="w-4 h-4 text-[#9B785D]" />
                 ) : (
                   <img
                     src={mascotImage}
-                    alt="탐정 프로필"
+                    alt="학습자 프로필"
                     onError={() => setAvatarImgErr(true)}
                     className="w-full h-full object-cover"
                   />
@@ -980,15 +1085,15 @@ export default function App() {
                     onChange={(e) => setNicknameDraft(e.target.value)}
                     maxLength={14}
                     aria-label="학생 닉네임"
-                    className="w-24 px-1.5 py-0.5 text-xs font-bold bg-[#FFF9EF] border border-[#9B785D] rounded-md text-[#2D2620] focus:outline-none"
+                    className="w-24 px-2 py-1 text-xs font-bold bg-[#FFF9EF] border border-[#9B785D] rounded-lg text-[#2D2620] focus:outline-none"
                     autoFocus
                   />
                   <button
                     type="submit"
                     aria-label="닉네임 저장"
-                    className="p-1 rounded-md bg-[#9BCB83] text-[#1A3110] cursor-pointer"
+                    className="p-1.5 rounded-lg bg-[#58CC02] text-white cursor-pointer"
                   >
-                    <Check className="w-3 h-3" />
+                    <Check className="w-3.5 h-3.5" />
                   </button>
                 </form>
               ) : (
@@ -998,30 +1103,44 @@ export default function App() {
                     setNicknameDraft(gameState.profile.nickname);
                     setEditingNickname(true);
                   }}
-                  className="inline-flex items-center gap-1 text-xs font-extrabold text-[#2D2620] hover:text-[#9B785D] cursor-pointer"
+                  className="inline-flex items-center gap-1 text-xs sm:text-sm font-extrabold text-[#2D2620] hover:text-[#1CB0F6] cursor-pointer whitespace-nowrap"
                   title="닉네임 수정하기"
                 >
                   <span>{gameState.profile.nickname}</span>
-                  <Edit3 className="w-3 h-3 text-[#9B785D]" />
+                  <Edit3 className="w-3.5 h-3.5 text-[#777777]" />
                 </button>
               )}
             </div>
 
             {/* Live Streak Indicator */}
             {gameState.profile.currentStreak >= 1 && (
-              <div className="inline-flex items-center gap-1 bg-[#F39A83]/25 border-2 border-[#D1684E] rounded-2xl px-2.5 py-1.5 text-xs font-extrabold text-[#7A2D1C] tabular-nums">
-                <Flame className="w-3.5 h-3.5 text-[#C25D44]" />
+              <div className="inline-flex items-center gap-1 bg-[#FFF2DF] border-2 border-[#FF9600] rounded-2xl px-3 min-h-[42px] text-xs sm:text-sm font-extrabold text-[#B25E00] tabular-nums whitespace-nowrap">
+                <Flame className="w-4 h-4 text-[#FF9600] fill-[#FF9600]" />
                 <span>{gameState.profile.currentStreak}연속</span>
               </div>
             )}
 
-            <div className="hidden sm:flex items-center gap-2.5 bg-white border-2 border-[#EAE0D0] rounded-2xl px-3 py-1.5">
-              <span className="text-xs font-extrabold text-[#9B785D] font-mono tabular-nums">
+            <div
+              className={`hidden sm:flex items-center gap-2.5 bg-white border-2 rounded-2xl px-3.5 min-h-[42px] ${
+                isLavenderTheme ? 'border-[#C9C2E8]' : 'border-[#EAE0D0]'
+              }`}
+            >
+              <span
+                className={`text-xs font-extrabold font-mono tabular-nums ${
+                  isLavenderTheme ? 'text-[#5E48A3]' : 'text-[#58A700]'
+                }`}
+              >
                 LV.{levelInfo.level}
               </span>
-              <div className="w-20 h-2 bg-[#F2ECE1] rounded-full overflow-hidden">
+              <div
+                className={`w-20 h-2.5 rounded-full overflow-hidden ${
+                  isLavenderTheme ? 'bg-[#E5E2F4]' : 'bg-[#E5E5E5]'
+                }`}
+              >
                 <div
-                  className="h-full bg-[#9BCB83] rounded-full transition-all"
+                  className={`h-full rounded-full transition-all ${
+                    isLavenderTheme ? 'bg-[#7963A8]' : 'bg-[#58CC02]'
+                  }`}
                   style={{ width: `${levelInfo.progressPct}%` }}
                 />
               </div>
@@ -1032,13 +1151,30 @@ export default function App() {
 
             <button
               type="button"
-              onClick={() => navigateToStudentView('collectibles')}
-              className="inline-flex items-center gap-1.5 bg-[#FFE18A]/50 border-2 border-[#E0B94B] rounded-2xl px-3 py-1.5 text-xs font-extrabold text-[#2D2620] cursor-pointer tabular-nums"
+              onClick={() => {
+                setCollectiblesTab('badges');
+                navigateToStudentView('collectibles');
+              }}
+              className="dq-btn-3d inline-flex items-center gap-1.5 bg-[#FFF6DA] border-2 border-[#FFC800] rounded-2xl px-3.5 min-h-[42px] text-xs font-extrabold text-[#6B4A00] cursor-pointer tabular-nums whitespace-nowrap"
             >
-              <Award className="w-3.5 h-3.5 text-[#9B6B00]" />
+              <Award className="w-4 h-4 text-[#C68900]" />
               <span>
                 배지 {earnedBadgeIds.length} · {completedTotal}/56
               </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSettingsOpen(false);
+                setTutorialOpen(true);
+              }}
+              aria-label="문제 푸는 법 튜토리얼 보기"
+              title="문제 푸는 법 튜토리얼"
+              className="dq-btn-3d inline-flex items-center gap-1.5 bg-[#EEFFD9] border-2 border-[#58CC02] rounded-2xl px-3.5 min-h-[42px] text-xs font-extrabold text-[#285E00] hover:bg-[#D7FFB8] cursor-pointer whitespace-nowrap"
+            >
+              <HelpCircle className="w-4 h-4 text-[#46A302]" />
+              <span>튜토리얼</span>
             </button>
 
             <button
@@ -1051,10 +1187,12 @@ export default function App() {
               }
               aria-label={audioSettings.masterMuted ? '전체 소리 켜기' : '전체 음소거'}
               title={audioSettings.masterMuted ? '소리 켜기' : '전체 음소거'}
-              className={`p-2 rounded-xl border-2 cursor-pointer ${
+              className={`dq-btn-3d min-w-[42px] min-h-[42px] px-2.5 rounded-2xl border-2 flex items-center justify-center cursor-pointer ${
                 audioSettings.masterMuted
-                  ? 'border-[#F39A83] bg-[#F39A83]/20 text-[#7A2D1C]'
-                  : 'border-[#EAE0D0] bg-white text-[#5C4D42] hover:text-[#2D2620] hover:border-[#9B785D]'
+                  ? 'border-[#FF4B4B] bg-[#FFDFE0] text-[#9A1B1B]'
+                  : isLavenderTheme
+                    ? 'border-[#C9C2E8] bg-white text-[#49467A] hover:border-[#6A52A3]'
+                    : 'border-[#EAE0D0] bg-white text-[#5C4D42] hover:border-[#1CB0F6]'
               }`}
             >
               {audioSettings.masterMuted ? (
@@ -1068,26 +1206,13 @@ export default function App() {
               type="button"
               onClick={() => setSettingsOpen((o) => !o)}
               aria-label="설정 열기"
-              className="p-2 rounded-xl border-2 border-[#EAE0D0] bg-white text-[#5C4D42] hover:text-[#2D2620] hover:border-[#9B785D] cursor-pointer"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setSettingsOpen(false);
-                setActiveView('teacher');
-              }}
-              aria-label="교사용 관리 모드 (비밀번호 필요)"
-              className={`px-2.5 py-2 rounded-xl border-2 text-xs font-bold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap ${
-                activeView === 'teacher'
-                  ? 'bg-[#FFE18A] border-[#C9961A] text-[#2D2620]'
-                  : 'bg-white border-[#EAE0D0] text-[#6E5E52] hover:text-[#2D2620]'
+              className={`dq-btn-3d min-w-[42px] min-h-[42px] px-2.5 rounded-2xl border-2 bg-white flex items-center justify-center cursor-pointer ${
+                isLavenderTheme
+                  ? 'border-[#C9C2E8] text-[#49467A] hover:border-[#6A52A3]'
+                  : 'border-[#EAE0D0] text-[#5C4D42] hover:border-[#1CB0F6]'
               }`}
             >
-              <Lock className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">교사용</span>
+              <Settings className="w-4 h-4" />
             </button>
 
             {settingsOpen && (
@@ -1163,7 +1288,7 @@ export default function App() {
                   <div className="flex items-center gap-2">
                     <label
                       htmlFor="bgm-vol-slider"
-                      className="text-[11px] font-semibold text-[#6E5E52] shrink-0"
+                      className="text-xs font-semibold text-[#6E5E52] shrink-0"
                     >
                       음량
                     </label>
@@ -1181,7 +1306,7 @@ export default function App() {
                       }
                       className="w-full accent-[#9BCB83] cursor-pointer"
                     />
-                    <span className="text-[11px] font-mono text-[#5C4D42] w-8 text-right tabular-nums">
+                    <span className="text-xs font-mono text-[#5C4D42] w-10 text-right tabular-nums">
                       {Math.round(audioSettings.bgmVolume * 100)}%
                     </span>
                   </div>
@@ -1235,7 +1360,7 @@ export default function App() {
                   <div className="flex items-center gap-2">
                     <label
                       htmlFor="sfx-vol-slider"
-                      className="text-[11px] font-semibold text-[#6E5E52] shrink-0"
+                      className="text-xs font-semibold text-[#6E5E52] shrink-0"
                     >
                       음량
                     </label>
@@ -1253,7 +1378,7 @@ export default function App() {
                       }
                       className="w-full accent-[#F39A83] cursor-pointer"
                     />
-                    <span className="text-[11px] font-mono text-[#5C4D42] w-8 text-right tabular-nums">
+                    <span className="text-xs font-mono text-[#5C4D42] w-10 text-right tabular-nums">
                       {Math.round(audioSettings.sfxVolume * 100)}%
                     </span>
                   </div>
@@ -1277,23 +1402,41 @@ export default function App() {
                     {gameState.profile.reducedMotion ? '줄이기' : '켜짐'}
                   </span>
                 </button>
+
+                <div className="pt-1 border-t border-[#EAE0D0]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSettingsOpen(false);
+                      setActiveView('teacher');
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-[#FAF6EE] border border-[#DFD2BE] text-xs font-bold text-[#5C4D42] hover:text-[#2D2620] cursor-pointer"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>교사용 관리 모드</span>
+                    </span>
+                    <span className="text-xs text-[#8B7F73]">PIN 필요</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
         </div>
       </header>
+      )}
 
       {/* Instant Floating Toast Notification */}
       {toastNotification && (
-        <div className="fixed top-20 right-4 z-50 clay-card rounded-2xl bg-[#FFE18A] border-[#C9961A] px-4 py-3 flex items-center gap-3 max-w-xs">
-          <div className="w-9 h-9 rounded-xl bg-white border border-[#D4A72C] flex items-center justify-center shrink-0">
+        <div className="rq-feedback-rise fixed top-20 right-4 z-50 clay-card rounded-2xl bg-[#FFE18A] border-[#C9961A] px-4 py-3 flex items-center gap-3 max-w-xs">
+          <div className="w-9 h-9 rounded-xl bg-white border-2 border-[#D4A72C] flex items-center justify-center shrink-0">
             <Star className="w-5 h-5 text-[#9B6B00] fill-[#FFE18A] animate-star-pop" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-xs font-extrabold text-[#2D2620] truncate">
+            <div className="text-xs sm:text-sm font-extrabold text-[#2D2620] truncate">
               {toastNotification.title}
             </div>
-            <div className="text-[11px] font-semibold text-[#5C4D42]">
+            <div className="text-xs font-semibold text-[#5C4D42]">
               {toastNotification.subtitle}
             </div>
           </div>
@@ -1301,21 +1444,36 @@ export default function App() {
             type="button"
             onClick={() => setToastNotification(null)}
             aria-label="알림 닫기"
-            className="text-[#5C4D42] hover:text-[#2D2620] cursor-pointer"
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-[#5C4D42] hover:text-[#2D2620] cursor-pointer"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
       {/* Main Content Container */}
-      <main className="flex-1 w-full max-w-[1440px] mx-auto px-4 lg:px-8 py-6 pb-28">
+      <main
+        className={`flex-1 w-full mx-auto px-4 lg:px-8 py-5 ${
+          activeView === 'workspace'
+            ? 'max-w-[1640px] pb-8'
+            : 'max-w-[1440px] pb-28'
+        }`}
+      >
         {activeView === 'map' && (
           <AdventureMap
             questions={EXTRACTED_QUESTIONS}
             progressById={gameState.progressById}
             nodeStatusMap={nodeStatusMap}
             dailyQuest={gameState.dailyQuest}
+            dailyGoalTarget={gameState.profile.dailyGoalTarget ?? 3}
+            attendanceDates={gameState.profile.attendanceDates ?? []}
+            level={levelInfo.level}
+            equippedGearId={gameState.profile.equippedGearId ?? 'gear_1'}
+            onEquipGear={handleEquipGear}
+            onOpenTeacherMode={() => {
+              setSettingsOpen(false);
+              setActiveView('teacher');
+            }}
             clearedBossZones={gameState.clearedBossZones}
             collectedMapObjects={collectedMapObjects}
             justCompletedQuestionId={justCompletedQuestionId}
@@ -1337,6 +1495,10 @@ export default function App() {
             onCollectMapObject={handleCollectMapObject}
             lastActiveQuestionId={gameState.profile.lastActiveQuestionId}
             onIslandChange={setActiveMapIsland}
+            onOpenVocabQuiz={() => {
+              setCollectiblesTab('quiz');
+              navigateToStudentView('collectibles');
+            }}
           />
         )}
 
@@ -1345,7 +1507,10 @@ export default function App() {
             question={currentQuestion}
             allQuestions={EXTRACTED_QUESTIONS}
             progress={currentProgress}
+            progressById={gameState.progressById}
             totalXp={gameState.profile.xp}
+            level={levelInfo.level}
+            equippedGearId={gameState.profile.equippedGearId ?? 'gear_1'}
             currentStreak={gameState.profile.currentStreak}
             reducedMotion={gameState.profile.reducedMotion}
             nickname={gameState.profile.nickname}
@@ -1364,10 +1529,29 @@ export default function App() {
               }
             }}
             hasNextMission={Boolean(nextMissionOnSameIsland)}
+            nextMissionLabel={nextMissionLabel}
+            onSelectQuestion={handleStartMission}
+            isBookmarked={(gameState.profile.bookmarkedIds ?? []).includes(
+              currentQuestion.id,
+            )}
+            onToggleBookmark={() => handleToggleBookmark(currentQuestion.id)}
+            masterMuted={audioSettings.masterMuted}
+            onToggleMute={() =>
+              setAudioSettings((s) => ({
+                ...s,
+                masterMuted: !s.masterMuted,
+              }))
+            }
+            dailyQuestBonusXp={lastDailyBonusXp}
+            onClearCelebrationMeta={() => {
+              setNewlyUnlockedBadges([]);
+              setLastDailyBonusXp(0);
+            }}
             onOpenReview={() => {
               setReviewHistoryTab('review');
               navigateToStudentView('reviewHistory');
             }}
+            onOpenTutorial={() => setTutorialOpen(true)}
             newlyUnlockedBadgeTitles={newlyUnlockedBadges}
           />
         )}
@@ -1377,6 +1561,7 @@ export default function App() {
             questions={EXTRACTED_QUESTIONS}
             progressById={gameState.progressById}
             earnedBadgeIds={earnedBadgeIds}
+            initialTab={collectiblesTab}
             onStartMission={handleStartMission}
             onAwardQuizXp={handleAwardQuizXp}
           />
@@ -1415,6 +1600,7 @@ export default function App() {
               <ReviewMissionsView
                 questions={EXTRACTED_QUESTIONS}
                 progressById={gameState.progressById}
+                bookmarkedIds={gameState.profile.bookmarkedIds ?? []}
                 onStartMission={handleStartMission}
               />
             ) : (
@@ -1424,6 +1610,13 @@ export default function App() {
                 history={gameState.history}
                 xp={gameState.profile.xp}
                 streakCount={gameState.profile.streakCount}
+                gameState={gameState}
+                transcripts={transcripts}
+                onRestoreBackup={(restoredState, restoredTranscripts) => {
+                  setGameState(restoredState);
+                  setTranscripts(restoredTranscripts);
+                  setNicknameDraft(restoredState.profile.nickname);
+                }}
                 onStartMission={handleStartMission}
               />
             )}
@@ -1555,6 +1748,7 @@ export default function App() {
           onClose={() => setBossSession(null)}
           onRecordBossQuestionResult={handleRecordBossQuestionResult}
           onBossZoneCleared={handleBossZoneCleared}
+          onJumpToQuestion={handleStartMission}
         />
       )}
 
@@ -1565,79 +1759,134 @@ export default function App() {
         onDismiss={() => setRewardCelebration(null)}
       />
 
-      {/* First-visit quick nickname & instant start modal */}
+      {/* First-visit quick nickname & instant tutorial modal */}
       {!gameState.profile.onboarded && activeView !== 'teacher' && (
         <WelcomeOnboardingModal
           initialNickname={gameState.profile.nickname}
+          mode="onboarding"
+          initialStep={1}
           onComplete={handleCompleteOnboarding}
         />
       )}
 
-      {/* Clean 4-Item Student Bottom Dock */}
-      <nav
-        aria-label="탐험 메뉴"
-        className="fixed bottom-0 inset-x-0 z-30 bg-[#FFFDF8]/95 backdrop-blur-xs border-t-2 border-[#EAE0D0] px-3 py-2"
-      >
-        <div className="max-w-2xl mx-auto grid grid-cols-4 gap-2">
+      {/* Re-openable Problem-Solving Tutorial Modal */}
+      {tutorialOpen && gameState.profile.onboarded && (
+        <WelcomeOnboardingModal
+          initialNickname={gameState.profile.nickname}
+          mode="tutorial"
+          initialStep={2}
+          onClose={() => setTutorialOpen(false)}
+          onComplete={(nickname, startImmediately, preferredYear, dailyGoal) => {
+            setTutorialOpen(false);
+            handleCompleteOnboarding(
+              nickname,
+              startImmediately,
+              preferredYear,
+              dailyGoal,
+            );
+          }}
+        />
+      )}
+
+      {/* Bottom-Right Floating Toolkit (Font Expander 13pt~17pt + Quick Problem Search) */}
+      {activeView !== 'teacher' && (
+        <FloatingToolkit
+          questions={EXTRACTED_QUESTIONS}
+          progressById={gameState.progressById}
+          bookmarkedIds={gameState.profile.bookmarkedIds ?? []}
+          currentQuestionId={
+            activeView === 'workspace' ? currentQuestion.id : undefined
+          }
+          isInWorkspace={activeView === 'workspace'}
+          isLavenderTheme={isLavenderTheme}
+          fontScale={gameState.profile.fontScale ?? 'md'}
+          onChangeFontScale={handleChangeFontScale}
+          onSelectQuestion={handleStartMission}
+          onOpenHintSheet={
+            activeView === 'workspace'
+              ? () => window.dispatchEvent(new CustomEvent('rq-open-beginner-hint'))
+              : undefined
+          }
+          onOpenTutorial={() => setTutorialOpen(true)}
+        />
+      )}
+
+      {/* Clean 4-Item Student Bottom Dock (Hidden during Focus Lesson Mode in Workspace) */}
+      {activeView !== 'workspace' && (
+        <nav
+          aria-label="학습 메뉴"
+          className={`fixed bottom-0 inset-x-0 z-30 backdrop-blur-xs border-t-2 px-2.5 sm:px-3 py-2 transition-colors duration-300 ${
+            isLavenderTheme
+              ? 'bg-[#F9F9FF]/95 border-[#C9C2E8]'
+              : 'bg-[#FFFDF8]/95 border-[#EAE0D0]'
+          }`}
+        >
+        <div className="max-w-2xl mx-auto grid grid-cols-4 gap-1.5 sm:gap-2">
           <button
             type="button"
             onClick={() => navigateToStudentView('map')}
-            className={`px-2 sm:px-4 py-2 rounded-2xl text-xs font-extrabold inline-flex items-center justify-center gap-1.5 border-2 transition-colors whitespace-nowrap cursor-pointer ${
+            className={`dq-btn-3d min-h-[48px] px-1.5 sm:px-3 py-2 rounded-2xl text-xs font-extrabold inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 border-2 whitespace-nowrap cursor-pointer ${
               activeView === 'map'
-                ? 'bg-[#9BCB83]/35 border-[#5D8A43] text-[#1A3110]'
-                : 'bg-white border-[#EAE0D0] text-[#5C4D42] hover:border-[#9B785D]'
+                ? isLavenderTheme
+                  ? 'bg-[#EAE3FA] border-[#6A52A3] text-[#211442]'
+                  : 'bg-[#D7FFB8] border-[#58CC02] text-[#1E4600]'
+                : isLavenderTheme
+                  ? 'bg-white border-[#D4D1EC] text-[#49467A] hover:border-[#6A52A3]'
+                  : 'bg-white border-[#E5E5E5] text-[#5C4D42] hover:border-[#1CB0F6]'
             }`}
           >
             <MapIcon className="w-4 h-4 shrink-0" />
-            <span>탐험 지도</span>
+            <span>전체 문제</span>
           </button>
 
           <button
             type="button"
             onClick={handleContinueLearning}
-            className={`clay-btn px-2 sm:px-4 py-2 rounded-2xl text-xs font-extrabold inline-flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer ${
-              activeView === 'workspace'
-                ? 'bg-[#FFE18A] text-[#2D2620]'
-                : 'bg-[#F39A83] text-[#2D2620]'
-            }`}
+            className="dq-btn-3d min-h-[48px] px-1.5 sm:px-3 py-2 rounded-2xl text-xs font-extrabold inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 border-2 whitespace-nowrap cursor-pointer bg-[#1CB0F6] border-[#1899D6] text-white"
           >
             <Compass className="w-4 h-4 shrink-0" />
             <span>
               {!gameState.profile.lastActiveQuestionId && completedTotal === 0
                 ? '첫 문제 풀기'
-                : activeView === 'workspace'
-                  ? '문제 풀이 중'
-                  : '이어 풀기'}
+                : '이어서 풀기'}
             </span>
           </button>
 
           <button
             type="button"
-            onClick={() => navigateToStudentView('collectibles')}
-            className={`px-2 sm:px-4 py-2 rounded-2xl text-xs font-extrabold inline-flex items-center justify-center gap-1.5 border-2 transition-colors whitespace-nowrap cursor-pointer ${
+            onClick={() => {
+              setCollectiblesTab('badges');
+              navigateToStudentView('collectibles');
+            }}
+            className={`dq-btn-3d min-h-[48px] px-1.5 sm:px-3 py-2 rounded-2xl text-xs font-extrabold inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 border-2 whitespace-nowrap cursor-pointer ${
               activeView === 'collectibles'
-                ? 'bg-[#C9B9E8]/40 border-[#7963A8] text-[#2E204D]'
-                : 'bg-white border-[#EAE0D0] text-[#5C4D42] hover:border-[#9B785D]'
+                ? 'bg-[#EAE3FA] border-[#7963A8] text-[#2E204D]'
+                : isLavenderTheme
+                  ? 'bg-white border-[#D4D1EC] text-[#49467A] hover:border-[#7963A8]'
+                  : 'bg-white border-[#E5E5E5] text-[#5C4D42] hover:border-[#7963A8]'
             }`}
           >
             <Award className="w-4 h-4 shrink-0" />
-            <span>배지 · 단어장</span>
+            <span>단어 · 배지</span>
           </button>
 
           <button
             type="button"
             onClick={() => navigateToStudentView('reviewHistory')}
-            className={`px-2 sm:px-4 py-2 rounded-2xl text-xs font-extrabold inline-flex items-center justify-center gap-1.5 border-2 transition-colors whitespace-nowrap cursor-pointer ${
+            className={`dq-btn-3d min-h-[48px] px-1.5 sm:px-3 py-2 rounded-2xl text-xs font-extrabold inline-flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 border-2 whitespace-nowrap cursor-pointer ${
               activeView === 'reviewHistory'
-                ? 'bg-[#FFE18A]/50 border-[#D4A72C] text-[#2D2620]'
-                : 'bg-white border-[#EAE0D0] text-[#5C4D42] hover:border-[#9B785D]'
+                ? 'bg-[#FFF6DA] border-[#FFC800] text-[#6B4A00]'
+                : isLavenderTheme
+                  ? 'bg-white border-[#D4D1EC] text-[#49467A] hover:border-[#FFC800]'
+                  : 'bg-white border-[#E5E5E5] text-[#5C4D42] hover:border-[#FFC800]'
             }`}
           >
             <Flame className="w-4 h-4 shrink-0" />
-            <span>오답 · 기록</span>
+            <span>오답 · 복습</span>
           </button>
         </div>
       </nav>
+      )}
     </div>
   );
 }

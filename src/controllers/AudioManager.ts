@@ -14,9 +14,9 @@ export type BgmScene = 'none' | 'map' | 'workspace';
 const AUDIO_STORAGE_KEY = 'reading_quest_audio_v1';
 
 const DEFAULT_AUDIO_SETTINGS: AudioSettings = {
-  bgmEnabled: true,
+  bgmEnabled: false,
   sfxEnabled: true,
-  bgmVolume: 0.45,
+  bgmVolume: 0.4,
   sfxVolume: 0.7,
   masterMuted: false,
 };
@@ -33,7 +33,7 @@ export function loadAudioSettings(legacySoundEnabled?: boolean): AudioSettings {
     const parsed = JSON.parse(raw) as Partial<AudioSettings>;
     return {
       bgmEnabled:
-        parsed.bgmEnabled !== undefined ? Boolean(parsed.bgmEnabled) : true,
+        parsed.bgmEnabled !== undefined ? Boolean(parsed.bgmEnabled) : false,
       sfxEnabled:
         parsed.sfxEnabled !== undefined ? Boolean(parsed.sfxEnabled) : true,
       bgmVolume:

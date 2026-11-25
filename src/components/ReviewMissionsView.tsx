@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   ArrowRight,
   BarChart3,
+  Bookmark,
   Compass,
   Flame,
   RotateCcw,
@@ -13,14 +14,22 @@ import { MissionProgress } from '../types/game';
 interface ReviewMissionsViewProps {
   questions: ExtractedQuestion[];
   progressById: Record<string, MissionProgress>;
+  bookmarkedIds?: string[];
   onStartMission: (questionId: string) => void;
 }
 
-type ReviewQueue = 'retry' | 'belowThreeStars' | 'threePoints' | 'visuals' | 'unsolved';
+type ReviewQueue =
+  | 'retry'
+  | 'belowThreeStars'
+  | 'threePoints'
+  | 'visuals'
+  | 'unsolved'
+  | 'bookmarked';
 
 export const ReviewMissionsView: React.FC<ReviewMissionsViewProps> = ({
   questions,
   progressById,
+  bookmarkedIds = [],
   onStartMission,
 }) => {
   const [queue, setQueue] = useState<ReviewQueue>('threePoints');
@@ -37,8 +46,9 @@ export const ReviewMissionsView: React.FC<ReviewMissionsViewProps> = ({
     const threePoints = questions.filter((q) => q.points === 3);
     const visuals = questions.filter((q) => Boolean(q.chart || q.table));
     const unsolved = questions.filter((q) => !progressById[q.id]?.completed);
-    return { retry, belowThreeStars, threePoints, visuals, unsolved };
-  }, [questions, progressById]);
+    const bookmarked = questions.filter((q) => bookmarkedIds.includes(q.id));
+    return { retry, belowThreeStars, threePoints, visuals, unsolved, bookmarked };
+  }, [questions, progressById, bookmarkedIds]);
 
   const activeItems = lists[queue];
 
@@ -58,7 +68,7 @@ export const ReviewMissionsView: React.FC<ReviewMissionsViewProps> = ({
         </div>
 
         {/* Queue Selector Tabs */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {(
             [
               {
@@ -96,6 +106,13 @@ export const ReviewMissionsView: React.FC<ReviewMissionsViewProps> = ({
                 icon: Compass,
                 tone: 'bg-[#A8DCC8]/35 border-[#4D9479]',
               },
+              {
+                id: 'bookmarked',
+                label: '★ 찜한 문제',
+                count: lists.bookmarked.length,
+                icon: Bookmark,
+                tone: 'bg-[#C9B9E8]/40 border-[#7963A8]',
+              },
             ] as const
           ).map((tab) => {
             const Icon = tab.icon;
@@ -105,7 +122,7 @@ export const ReviewMissionsView: React.FC<ReviewMissionsViewProps> = ({
                 key={tab.id}
                 type="button"
                 onClick={() => setQueue(tab.id)}
-                className={`text-left p-3.5 rounded-2xl border-2 transition-all cursor-pointer ${
+                className={`dq-btn-3d min-h-[76px] text-left p-3.5 rounded-2xl border-2 transition-all cursor-pointer ${
                   isSelected
                     ? `${tab.tone} shadow-xs`
                     : 'bg-[#FFF9EF] border-[#EAE0D0] hover:border-[#9B785D]'
@@ -192,10 +209,10 @@ export const ReviewMissionsView: React.FC<ReviewMissionsViewProps> = ({
                   <button
                     type="button"
                     onClick={() => onStartMission(item.id)}
-                    className="clay-btn px-4 py-2 rounded-xl bg-[#A8DCC8] text-xs font-extrabold text-[#163B2D] inline-flex items-center gap-1.5 cursor-pointer"
+                    className="dq-btn-3d min-h-[44px] px-4 py-2 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-xs sm:text-sm font-extrabold text-white inline-flex items-center gap-1.5 cursor-pointer"
                   >
                     <span>도전하기</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
+                    <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
               </div>

@@ -24,6 +24,9 @@ export interface QuestionLabDraft {
   revealedModelAnswer: boolean;
   structureOverlayVisible: boolean;
   hintLevel: number;
+  // Stage 0: Persistent revealed word card IDs & quick meaning check
+  revealedFocusCardIds: string[];
+  focusMiniCheckDone: boolean;
   // Completion & idempotent XP claim
   sentenceCompleted: boolean;
   sentenceXpClaimed: boolean;
@@ -44,6 +47,8 @@ export function createEmptyQuestionLabDraft(): QuestionLabDraft {
     revealedModelAnswer: false,
     structureOverlayVisible: false,
     hintLevel: 0,
+    revealedFocusCardIds: [],
+    focusMiniCheckDone: false,
     sentenceCompleted: false,
     sentenceXpClaimed: false,
   };
@@ -94,5 +99,9 @@ export function getQuestionLabDraft(
     koAssemblyOrder: Array.isArray(existing.koAssemblyOrder)
       ? existing.koAssemblyOrder
       : [],
+    revealedFocusCardIds: Array.isArray(existing.revealedFocusCardIds)
+      ? existing.revealedFocusCardIds
+      : [],
+    focusMiniCheckDone: Boolean(existing.focusMiniCheckDone),
   };
 }
