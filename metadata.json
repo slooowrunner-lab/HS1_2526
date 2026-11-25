@@ -1,0 +1,6 @@
+{
+  "name": "중학 영어 복습 독해편 — PNG 문항 데이터 추출기",
+  "description": "18페이지 영어 독해 워크북 PNG 이미지에서 추출한 56개 문항 데이터를 검수·대조·내보내기하는 워크스페이스",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

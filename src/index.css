@@ -1,0 +1,188 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --rq-cream: #FFF9EF;
+    --rq-paper: #FFFFFF;
+    --rq-sky: #A9DDF5;
+    --rq-grass: #9BCB83;
+    --rq-mint: #A8DCC8;
+    --rq-butter: #FFE18A;
+    --rq-coral: #F39A83;
+    --rq-lavender: #C9B9E8;
+    --rq-brown: #9B785D;
+    --rq-ink: #2D2620;
+    --rq-ink-muted: #6E5E52;
+    --rq-border: #E8DAC8;
+
+    font-family: "Outfit", "Noto Sans KR", -apple-system, BlinkMacSystemFont, sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    color: var(--rq-ink);
+    background-color: var(--rq-cream);
+  }
+
+  code,
+  pre,
+  .font-mono {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Soft 3D Clay UI Surfaces */
+.clay-card {
+  background-color: #FFFFFF;
+  border: 2px solid #EAE0D0;
+  box-shadow: 0 5px 0 rgba(155, 120, 93, 0.12), 0 10px 24px rgba(155, 120, 93, 0.08);
+}
+
+.clay-card-soft {
+  background-color: #FFFDF8;
+  border: 2px solid #EAE0D0;
+  box-shadow: 0 4px 0 rgba(155, 120, 93, 0.1);
+}
+
+.clay-btn {
+  border: 2px solid rgba(45, 38, 32, 0.12);
+  box-shadow: 0 4px 0 rgba(155, 120, 93, 0.2);
+  transition: transform 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.clay-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 0 rgba(155, 120, 93, 0.24);
+}
+
+.clay-btn:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 rgba(155, 120, 93, 0.18);
+}
+
+.clay-node {
+  box-shadow: 0 5px 0 rgba(155, 120, 93, 0.24), 0 8px 16px rgba(45, 38, 32, 0.08);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.clay-node:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 7px 0 rgba(155, 120, 93, 0.28), 0 12px 20px rgba(45, 38, 32, 0.12);
+}
+
+.clay-node:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 rgba(155, 120, 93, 0.22);
+}
+
+/* Restraint 0.5s Success Micro-Animations (only triggered upon correct submission) */
+@keyframes rq-star-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.55) rotate(-14deg);
+  }
+  65% {
+    opacity: 1;
+    transform: scale(1.16) rotate(4deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+.animate-star-pop {
+  animation: rq-star-pop 460ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Interactive World Character & Object Animations (compositor-only, reduced-motion safe) */
+@keyframes rq-char-bob {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes rq-char-walk {
+  0%, 100% {
+    transform: translateY(0px) rotate(-4deg) scale(1.04);
+  }
+  50% {
+    transform: translateY(-7px) rotate(4deg) scale(1.08);
+  }
+}
+
+@keyframes rq-char-celebrate {
+  0%, 100% {
+    transform: translateY(0px) scale(1);
+  }
+  30% {
+    transform: translateY(-10px) scale(1.12) rotate(-5deg);
+  }
+  65% {
+    transform: translateY(-5px) scale(1.08) rotate(5deg);
+  }
+}
+
+@keyframes rq-char-explore {
+  0%, 100% {
+    transform: rotate(0deg) scale(1);
+  }
+  25% {
+    transform: rotate(-10deg) scale(1.06);
+  }
+  75% {
+    transform: rotate(10deg) scale(1.06);
+  }
+}
+
+@keyframes rq-particle-burst {
+  0% {
+    opacity: 0.95;
+    transform: translate(0, 0) scale(0.7);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--tx, 20px), var(--ty, -30px)) scale(1.15);
+  }
+}
+
+.rq-char-idle {
+  animation: rq-char-bob 2.6s ease-in-out infinite;
+}
+
+.rq-char-walking {
+  animation: rq-char-walk 320ms ease-in-out infinite;
+}
+
+.rq-char-celebrating {
+  animation: rq-char-celebrate 620ms ease-in-out 2;
+}
+
+.rq-char-exploring {
+  animation: rq-char-explore 750ms ease-in-out 2;
+}
+
+.rq-particle {
+  animation: rq-particle-burst 680ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Accessibility: Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.reduced-motion *,
+.reduced-motion *::before,
+.reduced-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
