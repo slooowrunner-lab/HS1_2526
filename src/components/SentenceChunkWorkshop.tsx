@@ -1534,7 +1534,7 @@ export const SentenceChunkWorkshop: React.FC<SentenceChunkWorkshopProps> = ({
                   className="dq-btn-3d min-h-[42px] px-4 py-2 rounded-xl bg-[#FFE18A] border-2 border-[#B68411] text-sm font-extrabold text-[#2D2620] inline-flex items-center gap-1.5 cursor-pointer"
                 >
                   <Wand2 className="w-4 h-4" />
-                  <span>자연스러운 순서로 정렬해보기</span>
+                  <span>자동 정렬</span>
                 </button>
               </div>
             )}
@@ -1613,7 +1613,7 @@ export const SentenceChunkWorkshop: React.FC<SentenceChunkWorkshopProps> = ({
                 }`}
               >
                 <ArrowLeft className="w-4 h-4" />
-                <span>A. 뜻 맞추기로</span>
+                <span>이전</span>
               </button>
 
               <button
@@ -1623,7 +1623,7 @@ export const SentenceChunkWorkshop: React.FC<SentenceChunkWorkshopProps> = ({
                 className="dq-btn-3d min-h-[54px] px-7 py-3 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-white text-base sm:text-lg font-extrabold disabled:bg-[#E5E5E5] disabled:border-[#D4D4D4] disabled:text-[#999999] disabled:cursor-not-allowed cursor-pointer inline-flex items-center gap-2"
               >
                 <Sparkles className="w-5 h-5" />
-                <span>내 해석 확인하기</span>
+                <span>정답 확인</span>
               </button>
             </div>
           </div>
@@ -1688,7 +1688,7 @@ export const SentenceChunkWorkshop: React.FC<SentenceChunkWorkshopProps> = ({
                 onClick={onGoToBoss}
                 className="dq-btn-3d min-h-[52px] px-6 py-3 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-base font-extrabold text-white inline-flex items-center gap-2 cursor-pointer"
               >
-                <span>이제 문제 풀고 답 고르기</span>
+                <span>문제 풀기</span>
                 <ArrowRight className="w-5 h-5" />
               </button>
             </div>

@@ -414,7 +414,12 @@ export const QuestionInspector: React.FC<QuestionInspectorProps> = ({
 
       {/* Right: Original PNG Side-by-Side Viewer */}
       <aside className="xl:col-span-6 flex flex-col">
-        <PngViewer pages={question.pages} />
+        <PngViewer
+          pages={question.pages}
+          targetExamLabel={`${question.sourceExam} (${question.originalItemNumber})`}
+          targetQuestionId={question.id}
+          islandTheme={question.examYear === '2026' ? 'lavender' : 'spring'}
+        />
       </aside>
     </div>
   );

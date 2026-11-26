@@ -116,6 +116,7 @@ export default function App() {
   );
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [setupModalOpen, setSetupModalOpen] = useState(false);
   const [teacherUnlocked, setTeacherUnlocked] = useState(false);
 
   const [bossSession, setBossSession] = useState<{
@@ -996,19 +997,43 @@ export default function App() {
 
   return (
     <div
-      className={`min-h-screen flex flex-col transition-colors duration-300 ${
+      className={`relative min-h-screen flex flex-col overflow-x-clip transition-colors duration-500 ${
         isLavenderTheme
           ? 'bg-[#F2F4FD] text-[#1F2142]'
           : 'bg-[#FFF9EF] text-[#2D2620]'
       } ${gameState.profile.reducedMotion ? 'reduced-motion' : ''}`}
     >
+      {/* Subtle Ambient Atmospheric Background Layers */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 overflow-hidden z-0"
+      >
+        <div
+          className={`rq-ambient-orb absolute -top-28 -left-24 w-80 h-80 sm:w-[440px] sm:h-[440px] rounded-full blur-3xl transition-colors duration-700 ${
+            isLavenderTheme ? 'bg-[#C9B9E8]/32' : 'bg-[#FFE18A]/32'
+          }`}
+        />
+        <div
+          className={`rq-ambient-orb absolute top-1/3 -right-28 w-72 h-72 sm:w-[420px] sm:h-[420px] rounded-full blur-3xl transition-colors duration-700 ${
+            isLavenderTheme ? 'bg-[#A9DDF5]/28' : 'bg-[#9BCB83]/22'
+          }`}
+          style={{ animationDelay: '-6s' }}
+        />
+        <div
+          className={`rq-ambient-orb absolute -bottom-24 left-1/3 w-72 h-72 sm:w-[360px] sm:h-[360px] rounded-full blur-3xl transition-colors duration-700 ${
+            isLavenderTheme ? 'bg-[#DED6FA]/30' : 'bg-[#A9DDF5]/24'
+          }`}
+          style={{ animationDelay: '-11s' }}
+        />
+      </div>
+
       {/* Top Cozy Adventure HUD (Hidden during Focus Lesson Mode in Workspace) */}
       {activeView !== 'workspace' && (
         <header
-          className={`sticky top-0 z-30 backdrop-blur-xs border-b-2 px-4 lg:px-8 py-2.5 transition-colors duration-300 ${
+          className={`sticky top-0 z-30 backdrop-blur-md border-b-2 px-4 lg:px-8 py-2.5 transition-colors duration-300 shadow-[0_3px_12px_rgba(45,38,32,0.04)] ${
             isLavenderTheme
-              ? 'bg-[#F9F9FF]/95 border-[#C9C2E8]'
-              : 'bg-[#FFFDF8]/95 border-[#EAE0D0]'
+              ? 'bg-[#F9F9FF]/92 border-[#C9C2E8]'
+              : 'bg-[#FFFDF8]/92 border-[#EAE0D0]'
           }`}
         >
         <div className="max-w-[1440px] mx-auto flex flex-wrap items-center justify-between gap-3">
@@ -1050,8 +1075,8 @@ export default function App() {
 
           <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 relative">
             <div
-              className={`flex items-center gap-2 bg-white border-2 rounded-2xl px-3 min-h-[42px] ${
-                isLavenderTheme ? 'border-[#C9C2E8]' : 'border-[#EAE0D0]'
+              className={`clay-card-soft flex items-center gap-2 bg-white border-2 rounded-2xl px-3 min-h-[42px] ${
+                isLavenderTheme ? '!border-[#C9C2E8]' : '!border-[#EAE0D0]'
               }`}
             >
               <div
@@ -1114,15 +1139,15 @@ export default function App() {
 
             {/* Live Streak Indicator */}
             {gameState.profile.currentStreak >= 1 && (
-              <div className="inline-flex items-center gap-1 bg-[#FFF2DF] border-2 border-[#FF9600] rounded-2xl px-3 min-h-[42px] text-xs sm:text-sm font-extrabold text-[#B25E00] tabular-nums whitespace-nowrap">
-                <Flame className="w-4 h-4 text-[#FF9600] fill-[#FF9600]" />
+              <div className="clay-card-soft inline-flex items-center gap-1 !bg-[#FFF2DF] !border-[#FF9600] rounded-2xl px-3 min-h-[42px] text-xs sm:text-sm font-extrabold text-[#B25E00] tabular-nums whitespace-nowrap">
+                <Flame className="w-4 h-4 text-[#FF9600] fill-[#FF9600] rq-float-gentle" />
                 <span>{gameState.profile.currentStreak}연속</span>
               </div>
             )}
 
             <div
-              className={`hidden sm:flex items-center gap-2.5 bg-white border-2 rounded-2xl px-3.5 min-h-[42px] ${
-                isLavenderTheme ? 'border-[#C9C2E8]' : 'border-[#EAE0D0]'
+              className={`clay-card-soft hidden sm:flex items-center gap-2.5 bg-white border-2 rounded-2xl px-3.5 min-h-[42px] ${
+                isLavenderTheme ? '!border-[#C9C2E8]' : '!border-[#EAE0D0]'
               }`}
             >
               <span
@@ -1133,16 +1158,23 @@ export default function App() {
                 LV.{levelInfo.level}
               </span>
               <div
-                className={`w-20 h-2.5 rounded-full overflow-hidden ${
+                className={`w-20 h-2.5 rounded-full overflow-hidden relative ${
                   isLavenderTheme ? 'bg-[#E5E2F4]' : 'bg-[#E5E5E5]'
                 }`}
               >
                 <div
-                  className={`h-full rounded-full transition-all ${
+                  className={`h-full rounded-full transition-all relative overflow-hidden ${
                     isLavenderTheme ? 'bg-[#7963A8]' : 'bg-[#58CC02]'
                   }`}
                   style={{ width: `${levelInfo.progressPct}%` }}
-                />
+                >
+                  {!gameState.profile.reducedMotion && (
+                    <div
+                      aria-hidden="true"
+                      className="rq-progress-glint absolute inset-y-0 w-10 bg-gradient-to-r from-transparent via-white/45 to-transparent"
+                    />
+                  )}
+                </div>
               </div>
               <span className="text-xs font-extrabold text-[#2D2620] font-mono tabular-nums">
                 {gameState.profile.xp} XP
@@ -1403,7 +1435,21 @@ export default function App() {
                   </span>
                 </button>
 
-                <div className="pt-1 border-t border-[#EAE0D0]">
+                <div className="pt-1 border-t border-[#EAE0D0] space-y-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSettingsOpen(false);
+                      setSetupModalOpen(true);
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-[#FFF9EF] border border-[#EAE0D0] text-xs font-bold text-[#2D2620] hover:border-[#1CB0F6] cursor-pointer"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Edit3 className="w-3.5 h-3.5 text-[#1CB0F6]" />
+                      <span>닉네임 · 시험지 설정</span>
+                    </span>
+                    <span className="text-xs text-[#6E5E52]">열기</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -1453,12 +1499,16 @@ export default function App() {
 
       {/* Main Content Container */}
       <main
-        className={`flex-1 w-full mx-auto px-4 lg:px-8 py-5 ${
+        className={`relative z-10 flex-1 w-full min-w-0 mx-auto px-3 sm:px-5 lg:px-8 py-5 ${
           activeView === 'workspace'
-            ? 'max-w-[1640px] pb-8'
+            ? 'max-w-[1640px] pb-24'
             : 'max-w-[1440px] pb-28'
         }`}
       >
+        <div
+          key={activeView === 'map' ? `map-${activeMapIsland}` : activeView}
+          className={!gameState.profile.reducedMotion ? 'rq-view-enter' : ''}
+        >
         {activeView === 'map' && (
           <AdventureMap
             questions={EXTRACTED_QUESTIONS}
@@ -1735,6 +1785,7 @@ export default function App() {
             }}
           />
         )}
+        </div>
       </main>
 
       {/* Zone Boss Time-Attack Modal */}
@@ -1766,6 +1817,25 @@ export default function App() {
           mode="onboarding"
           initialStep={1}
           onComplete={handleCompleteOnboarding}
+        />
+      )}
+
+      {/* Re-openable Nickname & Exam Sheet Setup Modal */}
+      {setupModalOpen && gameState.profile.onboarded && (
+        <WelcomeOnboardingModal
+          initialNickname={gameState.profile.nickname}
+          mode="setup"
+          initialStep={1}
+          onClose={() => setSetupModalOpen(false)}
+          onComplete={(nickname, startImmediately, preferredYear, dailyGoal) => {
+            setSetupModalOpen(false);
+            handleCompleteOnboarding(
+              nickname,
+              startImmediately,
+              preferredYear,
+              dailyGoal,
+            );
+          }}
         />
       )}
 

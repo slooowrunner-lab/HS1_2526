@@ -22,7 +22,7 @@ import mascotImage from '../assets/images/mascot_fox_detective_1795522642644.jpg
 interface WelcomeOnboardingModalProps {
   initialNickname: string;
   initialStep?: 1 | 2;
-  mode?: 'onboarding' | 'tutorial';
+  mode?: 'onboarding' | 'tutorial' | 'setup';
   onClose?: () => void;
   onComplete: (
     nickname: string,
@@ -121,29 +121,29 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
       aria-labelledby="welcome-heading"
       className="fixed inset-0 z-50 bg-[#1E1915]/55 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
     >
-      <div className="w-full max-w-2xl rounded-3xl bg-white border-2 border-[#E5E5E5] shadow-2xl overflow-hidden flex flex-col my-auto">
+      <div className="w-full max-w-2xl rounded-3xl bg-white border-2 border-[#E5E5E5] shadow-[0_14px_0_rgba(155,120,93,0.16),0_28px_56px_rgba(30,25,21,0.22)] overflow-hidden flex flex-col my-auto rq-view-enter">
         {/* Top Onboarding / Tutorial Bar */}
-        <div className="px-5 sm:px-7 pt-5 pb-3 flex items-center gap-4 border-b border-[#F0F0F0]">
-          {step === 2 && mode === 'onboarding' ? (
+        <div className="px-5 sm:px-7 pt-5 pb-3 flex items-center gap-4 border-b border-[#F0F0F0] bg-gradient-to-b from-[#FFFDF8] to-white">
+          {step === 2 && (mode === 'onboarding' || mode === 'setup') ? (
             <button
               type="button"
               onClick={() => setStep(1)}
               aria-label="이전 화면으로 돌아가기"
-              className="w-11 h-11 rounded-xl border-2 border-[#E5E5E5] bg-white hover:bg-[#F7F7F7] text-[#4B4B4B] flex items-center justify-center shrink-0 cursor-pointer"
+              className="dq-btn-3d w-11 h-11 rounded-xl border-2 border-[#E5E5E5] bg-white hover:bg-[#F7F7F7] text-[#4B4B4B] flex items-center justify-center shrink-0 cursor-pointer"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
-          ) : mode === 'tutorial' && onClose ? (
+          ) : (mode === 'tutorial' || mode === 'setup') && onClose ? (
             <button
               type="button"
               onClick={onClose}
-              aria-label="푸는 법 창 닫기"
-              className="w-11 h-11 rounded-xl border-2 border-[#E5E5E5] bg-white hover:bg-[#F7F7F7] text-[#4B4B4B] flex items-center justify-center shrink-0 cursor-pointer"
+              aria-label="창 닫기"
+              className="dq-btn-3d w-11 h-11 rounded-xl border-2 border-[#E5E5E5] bg-white hover:bg-[#F7F7F7] text-[#4B4B4B] flex items-center justify-center shrink-0 cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
           ) : (
-            <div className="w-11 h-11 rounded-xl bg-[#EAF9DC] border-2 border-[#58CC02]/40 flex items-center justify-center shrink-0">
+            <div className="w-11 h-11 rounded-xl bg-[#EAF9DC] border-2 border-[#58CC02]/40 flex items-center justify-center shrink-0 rq-float-gentle">
               <Compass className="w-5 h-5 text-[#46A302]" />
             </div>
           )}
@@ -216,30 +216,57 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
                 </div>
               </div>
 
-              {/* Optional Nickname */}
-              <div className="space-y-1.5">
+              {/* Optional Nickname + Live Explorer Card Preview */}
+              <div className="space-y-2.5">
                 <label
                   htmlFor="student-onboarding-name"
                   className="block text-sm font-extrabold text-[#3C3C3C]"
                 >
                   이름 또는 별명 (안 써도 괜찮아요)
                 </label>
-                <input
-                  id="student-onboarding-name"
-                  type="text"
-                  value={nameInput}
-                  onChange={(e) => setNameInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleFinish(true);
-                    }
-                  }}
-                  maxLength={14}
-                  placeholder="예: 민준, 지우 (Enter를 누르면 바로 시작)"
-                  autoFocus
-                  className="w-full px-4 py-3.5 text-base font-bold text-[#1E1915] bg-[#F7F7F7] border-2 border-[#E5E5E5] rounded-2xl focus:outline-none focus:bg-white focus:border-[#1CB0F6] placeholder:font-normal placeholder:text-[#8A8A8A]"
-                />
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                  <input
+                    id="student-onboarding-name"
+                    type="text"
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleFinish(true);
+                      }
+                    }}
+                    maxLength={14}
+                    placeholder="예: 민준, 지우 (Enter를 누르면 바로 시작)"
+                    autoFocus
+                    className="flex-1 px-4 py-3.5 text-base font-bold text-[#1E1915] bg-[#F7F7F7] border-2 border-[#E5E5E5] rounded-2xl focus:outline-none focus:bg-white focus:border-[#1CB0F6] placeholder:font-normal placeholder:text-[#8A8A8A] shadow-2xs"
+                  />
+                  <div
+                    className={`clay-card-soft rounded-2xl px-3.5 py-2.5 flex items-center gap-2.5 shrink-0 transition-colors ${
+                      preferredYear === '2026'
+                        ? '!bg-[#F4F2FC] !border-[#C9B9E8]'
+                        : '!bg-[#FFF9EF] !border-[#E8DAC8]'
+                    }`}
+                  >
+                    <span
+                      className={`text-xs font-mono font-extrabold px-2 py-0.5 rounded-lg border tabular-nums ${
+                        preferredYear === '2026'
+                          ? 'bg-[#EAE3FA] border-[#8B72C9] text-[#3F297A]'
+                          : 'bg-[#EEFFD9] border-[#58CC02] text-[#285E00]'
+                      }`}
+                    >
+                      {preferredYear === '2026' ? '제2시험지' : '제1시험지'}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-[11px] font-bold text-[#6E5E52] leading-none">
+                        플레이어
+                      </div>
+                      <div className="text-sm font-extrabold text-[#1E1915] truncate max-w-[110px] mt-0.5">
+                        {cleanName}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Start Exam Selector */}
@@ -251,14 +278,21 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setPreferredYear('2025')}
-                    className={`dq-btn-3d relative text-left p-4 rounded-2xl border-2 cursor-pointer transition-all ${
+                    className={`dq-btn-3d rq-hover-lift relative text-left p-4 rounded-2xl border-2 cursor-pointer transition-all ${
                       preferredYear === '2025'
-                        ? 'bg-[#DDF4FF] border-[#1CB0F6] text-[#143752]'
+                        ? 'bg-[#DDF4FF] border-[#1CB0F6] text-[#143752] ring-3 ring-[#1CB0F6]/25'
                         : 'bg-white border-[#E5E5E5] text-[#1E1915] hover:bg-[#F7F7F7]'
                     }`}
                   >
+                    <span className="inline-block text-[11px] font-extrabold text-[#3D6A27] mb-1.5">
+                      제1시험지 · 2025년
+                    </span>
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-[#FFE18A] border-2 border-[#E0B94B] flex items-center justify-center shrink-0">
+                      <div
+                        className={`w-10 h-10 rounded-xl bg-[#FFE18A] border-2 border-[#E0B94B] flex items-center justify-center shrink-0 ${
+                          preferredYear === '2025' ? 'rq-float-gentle' : ''
+                        }`}
+                      >
                         <BookOpen className="w-5 h-5 text-[#7A5200]" />
                       </div>
                       <div>
@@ -271,17 +305,24 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setPreferredYear('2026')}
-                    className={`dq-btn-3d relative text-left p-4 rounded-2xl border-2 cursor-pointer transition-all ${
+                    className={`dq-btn-3d rq-hover-lift relative text-left p-4 rounded-2xl border-2 cursor-pointer transition-all ${
                       preferredYear === '2026'
-                        ? 'bg-[#EAE3FA] border-[#7963A8] text-[#1E1442]'
+                        ? 'bg-[#EAE3FA] border-[#7963A8] text-[#1E1442] ring-3 ring-[#7963A8]/25'
                         : 'bg-white border-[#E5E5E5] text-[#1E1915] hover:bg-[#F7F7F7]'
                     }`}
                   >
-                    <span className="absolute -top-2.5 right-3 px-2.5 py-0.5 rounded-lg bg-[#1CB0F6] text-white text-xs font-extrabold">
+                    <span className="absolute -top-2.5 right-3 px-2.5 py-0.5 rounded-lg bg-[#1CB0F6] text-white text-xs font-extrabold shadow-xs">
                       최신 기출
                     </span>
+                    <span className="inline-block text-[11px] font-extrabold text-[#5E48A3] mb-1.5">
+                      제2시험지 · 2026년
+                    </span>
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-[#DED6FA] border-2 border-[#8B72C9] flex items-center justify-center shrink-0">
+                      <div
+                        className={`w-10 h-10 rounded-xl bg-[#DED6FA] border-2 border-[#8B72C9] flex items-center justify-center shrink-0 ${
+                          preferredYear === '2026' ? 'rq-float-gentle' : ''
+                        }`}
+                      >
                         <Compass className="w-5 h-5 text-[#3F297A]" />
                       </div>
                       <div>

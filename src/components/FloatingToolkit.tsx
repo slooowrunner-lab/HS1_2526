@@ -99,16 +99,16 @@ export const FloatingToolkit: React.FC<FloatingToolkitProps> = ({
     onChangeFontScale(order[nextIdx]);
   };
 
-  // Keep bottom offset clear of the fixed bottom dock (non-workspace) or sticky action bar (workspace)
+  // Keep bottom offset clear of the fixed bottom dock on map/list views, and stay tucked at bottom corner in workspace
   const fabBottomClass = isInWorkspace
-    ? 'bottom-28 sm:bottom-28'
+    ? 'bottom-4 sm:bottom-5'
     : 'bottom-24 sm:bottom-24';
 
   return (
     <>
       {/* Bottom-Right Floating Toolkit Anchor */}
       <div
-        className={`fixed right-4 sm:right-6 ${fabBottomClass} z-40 flex flex-col items-end gap-2.5`}
+        className={`fixed right-3 sm:right-5 ${fabBottomClass} z-40 max-w-[calc(100vw-1.5rem)] flex flex-col items-end gap-2.5`}
       >
         {menuOpen && (
           <div

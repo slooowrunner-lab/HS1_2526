@@ -7,6 +7,7 @@ import {
   BookOpen,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -16,8 +17,11 @@ import {
   HelpCircle,
   Lightbulb,
   Maximize2,
+  Minus,
   Play,
+  Plus,
   RotateCcw,
+  ScanSearch,
   Search,
   Sparkles,
   Star,
@@ -29,8 +33,21 @@ import { ExtractedQuestion } from '../types/question';
 import { LearningStage, MascotMood, MissionProgress } from '../types/game';
 import { formatItemNumber, STAGE_META } from '../utils/gameStorage';
 import { isTtsSupported, speakEnglish } from '../utils/tts';
+import {
+  BboxDebugScope,
+  BboxDebugTarget,
+  BboxOffset,
+  BboxPxDelta,
+  DEFAULT_IMAGE_DIMS,
+  getCoordForPage,
+  hasNonZeroDelta,
+  ImagePixelDimensions,
+  makeOffsetStorageKey,
+  ZERO_OFFSET_DELTA,
+} from '../utils/bboxDebug';
 import { MascotWidget } from './MascotWidget';
 import { PngViewer } from './PngViewer';
+import { BboxDebugPanel } from './BboxDebugPanel';
 import { FlowBuilderPanel } from './FlowBuilderPanel';
 import { SentenceChunkWorkshop } from './SentenceChunkWorkshop';
 import { KeyFocusWordCards } from './KeyFocusWordCards';
@@ -171,9 +188,37 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
 }) => {
   const ttsAvailable = isTtsSupported();
   const [splitPngOpen, setSplitPngOpen] = useState(true);
-  const [examPaneSize, setExamPaneSize] = useState<'normal' | 'wide'>('wide');
+  const [examPanePct, setExamPanePct] = useState<number>(() => {
+    try {
+      const saved = Number(localStorage.getItem('rq_exam_pane_pct_v1'));
+      if (Number.isFinite(saved) && saved >= 28 && saved <= 64) return saved;
+    } catch {
+      // Ignore storage access errors
+    }
+    return 46;
+  });
+  const [isResizingSplit, setIsResizingSplit] = useState(false);
+  const splitContainerRef = useRef<HTMLDivElement | null>(null);
   const [mobileInlinePng, setMobileInlinePng] = useState(false);
   const [pngModalOpen, setPngModalOpen] = useState(false);
+  const [bboxDebugOpen, setBboxDebugOpen] = useState(false);
+  const [activePngPage, setActivePngPage] = useState<number>(question.pages[0] ?? 1);
+  const [imageDims, setImageDims] = useState<ImagePixelDimensions>(DEFAULT_IMAGE_DIMS);
+  const [debugScope, setDebugScope] = useState<BboxDebugScope>('current');
+  const [debugTarget, setDebugTarget] = useState<BboxDebugTarget>(() =>
+    getCoordForPage(question, question.pages[0] ?? 1)?.focus ? 'focus' : 'outer',
+  );
+  const [debugDeltaByKey, setDebugDeltaByKey] = useState<Record<string, BboxPxDelta>>(() => {
+    try {
+      const raw = localStorage.getItem('rq_bbox_px_offsets_v1');
+      if (!raw) return {};
+      const parsed = JSON.parse(raw) as Record<string, BboxPxDelta>;
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+  const [pageDelta, setPageDelta] = useState<BboxPxDelta>(ZERO_OFFSET_DELTA);
   const [beginnerHintOpen, setBeginnerHintOpen] = useState(false);
   const [showHint, setShowHint] = useState(false);
   const [foxErr, setFoxErr] = useState(false);
@@ -221,6 +266,9 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
   const [museumImgError, setMuseumImgError] = useState(false);
   const [safeReplayNotice, setSafeReplayNotice] = useState(false);
   const [stage1SubPage, setStage1SubPage] = useState<'flow' | 'sentence'>('flow');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerYear, setPickerYear] = useState<'2025' | '2026'>(question.examYear);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
   const [foxCelebration, setFoxCelebration] = useState<{
     xpDelta: number;
     earnedStars: 0 | 1 | 2 | 3;
@@ -268,8 +316,35 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
     setSecondsLeft(90);
     setSafeReplayNotice(false);
     setStage1SubPage('flow');
+    setPickerOpen(false);
+    setPickerYear(question.examYear);
     setFoxCelebration(null);
-  }, [question.id, progress.bossChoiceIndex, progress.isCorrect, progress.stars]);
+  }, [question.id, question.examYear, progress.bossChoiceIndex, progress.isCorrect, progress.stars]);
+
+  useEffect(() => {
+    const firstPage = question.pages[0] ?? 1;
+    setActivePngPage(firstPage);
+    setDebugTarget(getCoordForPage(question, firstPage)?.focus ? 'focus' : 'outer');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [question.id]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onOutside = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setPickerOpen(false);
+      }
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPickerOpen(false);
+    };
+    window.addEventListener('mousedown', onOutside);
+    window.addEventListener('keydown', onEsc);
+    return () => {
+      window.removeEventListener('mousedown', onOutside);
+      window.removeEventListener('keydown', onEsc);
+    };
+  }, [pickerOpen]);
 
   useEffect(() => {
     const onOpenHint = () => setBeginnerHintOpen(true);
@@ -580,7 +655,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
   // Keyboard Left/Right arrow page flip + Stage 2 shortcuts (1-5 select, Enter submit)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (pngModalOpen || beginnerHintOpen || foxCelebration) return;
+      if (pngModalOpen || beginnerHintOpen || foxCelebration || pickerOpen) return;
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -695,7 +770,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
       </div>
 
       <div
-        className={`dq-speech-bubble ${!reducedMotion ? 'rq-speech-pop' : ''} flex-1 rounded-2xl border-2 bg-white px-5 py-4 space-y-2 ${
+        className={`dq-speech-bubble ${!reducedMotion ? 'rq-speech-pop' : ''} flex-1 min-w-0 rounded-2xl border-2 bg-white px-4 sm:px-5 py-4 space-y-2 ${
           isLavender ? 'border-[#CFCBE8]' : 'border-[#E5E5E5]'
         }`}
       >
@@ -707,7 +782,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
           {kicker}
         </div>
         <h2
-          className={`text-lg sm:text-xl font-extrabold leading-relaxed ${
+          className={`text-lg sm:text-xl font-extrabold leading-relaxed break-words [overflow-wrap:anywhere] ${
             isLavender ? 'text-[#14132E]' : 'text-[#1E1915]'
           }`}
         >
@@ -862,15 +937,107 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
     </>
   );
 
-  const showSplitPane = splitPngOpen && (stage === 0 || stage === 1 || stage === 2);
+  const showSplitPane =
+    splitPngOpen && (stage === 0 || stage === 1 || stage === 2 || bboxDebugOpen);
 
-  const examPaneColClass =
-    examPaneSize === 'wide' ? 'lg:col-span-7' : 'lg:col-span-6';
-  const workPaneColClass = showSplitPane
-    ? examPaneSize === 'wide'
-      ? 'lg:col-span-5'
-      : 'lg:col-span-6'
-    : 'lg:col-span-8';
+  const hasPageFocus = Boolean(getCoordForPage(question, activePngPage)?.focus);
+  const effectiveTarget: BboxDebugTarget =
+    debugTarget === 'focus' && hasPageFocus ? 'focus' : 'outer';
+  const debugKey = makeOffsetStorageKey(question.id, activePngPage, effectiveTarget);
+  const currentDebugDelta =
+    debugScope === 'page'
+      ? pageDelta
+      : (debugDeltaByKey[debugKey] ?? ZERO_OFFSET_DELTA);
+  const activeBboxOffset: BboxOffset = {
+    ...currentDebugDelta,
+    target: effectiveTarget,
+    scope: debugScope,
+  };
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('rq_bbox_px_offsets_v1', JSON.stringify(debugDeltaByKey));
+    } catch {
+      // Ignore storage access errors
+    }
+  }, [debugDeltaByKey]);
+
+  const handleChangeBboxOffset = (next: BboxOffset) => {
+    setDebugScope(next.scope);
+    const targetForNext: BboxDebugTarget =
+      next.target === 'focus' && hasPageFocus ? 'focus' : 'outer';
+    setDebugTarget(targetForNext);
+    const targetKey = makeOffsetStorageKey(question.id, activePngPage, targetForNext);
+    const delta: BboxPxDelta = { dx: next.dx, dy: next.dy, dw: next.dw, dh: next.dh };
+    if (next.scope === 'page') {
+      setPageDelta(delta);
+    } else {
+      setDebugDeltaByKey((prev) => {
+        if (!hasNonZeroDelta(delta)) {
+          if (!(targetKey in prev)) return prev;
+          const copy = { ...prev };
+          delete copy[targetKey];
+          return copy;
+        }
+        return {
+          ...prev,
+          [targetKey]: delta,
+        };
+      });
+    }
+  };
+
+  const handleResetBboxOffset = () => {
+    if (debugScope === 'page') {
+      setPageDelta(ZERO_OFFSET_DELTA);
+    } else {
+      setDebugDeltaByKey((prev) => {
+        const next = { ...prev };
+        delete next[debugKey];
+        return next;
+      });
+    }
+  };
+
+  const handleResetAllBboxOffsets = () => {
+    setDebugDeltaByKey({});
+    setPageDelta(ZERO_OFFSET_DELTA);
+  };
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('rq_exam_pane_pct_v1', String(examPanePct));
+    } catch {
+      // Ignore storage access errors
+    }
+  }, [examPanePct]);
+
+  const handleStartSplitDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!splitContainerRef.current) return;
+    e.preventDefault();
+    setIsResizingSplit(true);
+
+    const onMove = (ev: PointerEvent) => {
+      const container = splitContainerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const rawPct = ((ev.clientX - rect.left) / rect.width) * 100;
+      const clamped = Math.min(64, Math.max(28, Math.round(rawPct)));
+      setExamPanePct(clamped);
+    };
+
+    const onUp = () => {
+      setIsResizingSplit(false);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
 
   const stageAnimClass =
     !reducedMotion && pageTurnDir === 'next'
@@ -879,147 +1046,223 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
         ? 'rq-page-turn-prev'
         : '';
 
+  const pickerQuestions = pickerYear === '2025' ? questions2025 : questions2026;
+  const stageShortTitles = ['단서', '흐름·해석', '문제', '해설'];
+
   return (
-    <div className="space-y-5">
-      {/* Top Question Location & Progress Header */}
+    <div className="space-y-4">
+      {/* Compact Duolingo-Style 2-Row Top Bar + 4x7 Question Grid Popover */}
       <div
-        className={`rounded-3xl border-2 bg-white p-4 sm:p-5 space-y-3.5 shadow-xs ${
+        className={`rounded-3xl border-2 bg-white px-3.5 py-3 sm:px-4 sm:py-3.5 space-y-2.5 shadow-xs ${
           isLavender ? 'border-[#C6BEE8] !bg-[#FAF9FF]' : 'border-[#E5E5E5]'
         }`}
       >
-        {/* Row 1 (TOP ANCHOR): Prominent Question Number + Exam Location + Quick Switcher */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b-2 border-[#EFEAE0]">
-          <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+        {/* Row 1: [← 목록] + [2025 · 18번 ▾] + Thick Progress Bar + [◀ ▶] + [★] [🔊] [XP] */}
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+          <button
+            type="button"
+            onClick={onBackToMap}
+            aria-label="문제 목록으로 나가기"
+            title="문제 목록으로"
+            className={`dq-btn-3d min-h-[40px] px-3 rounded-2xl border-2 inline-flex items-center gap-1.5 shrink-0 cursor-pointer text-xs sm:text-sm font-extrabold transition-colors ${
+              isLavender
+                ? 'bg-[#EEF3FD] border-[#C9C2E8] text-[#1D2D5E] hover:bg-[#DFE9FB]'
+                : 'bg-white border-[#E5E5E5] text-[#4B4B4B] hover:bg-[#F7F7F7] hover:text-[#1E1915]'
+            }`}
+          >
+            <ArrowLeft className="w-4 h-4 shrink-0" />
+            <span>목록</span>
+          </button>
+
+          {/* Question Grid Popover Trigger */}
+          <div className="relative shrink-0" ref={pickerRef}>
             <button
               type="button"
-              onClick={onBackToMap}
-              aria-label="전체 문제 목록으로 나가기"
-              title="전체 문제 목록으로"
-              className={`dq-btn-3d min-h-[44px] px-3 rounded-2xl border-2 inline-flex items-center gap-1.5 shrink-0 cursor-pointer text-xs sm:text-sm font-extrabold transition-colors ${
+              onClick={() => {
+                setPickerYear(question.examYear);
+                setPickerOpen((v) => !v);
+              }}
+              aria-expanded={pickerOpen}
+              aria-label="문항 번호 선택 열기"
+              className={`dq-btn-3d min-h-[40px] px-3 sm:px-3.5 rounded-2xl border-2 inline-flex items-center gap-1.5 font-mono text-xs sm:text-sm font-extrabold text-white cursor-pointer tabular-nums ${
                 isLavender
-                  ? 'bg-[#EEF3FD] border-[#C9C2E8] text-[#1D2D5E] hover:bg-[#DFE9FB]'
-                  : 'bg-white border-[#E5E5E5] text-[#4B4B4B] hover:bg-[#F7F7F7] hover:text-[#1E1915]'
+                  ? 'bg-[#6A52A3] border-[#523B8C] hover:bg-[#5B4494]'
+                  : 'bg-[#58CC02] border-[#46A302] hover:bg-[#4FB802]'
               }`}
             >
-              <ArrowLeft className="w-4 h-4 shrink-0" />
-              <span className="hidden sm:inline">전체 문제</span>
+              <span>
+                {question.examYear} · {formatItemNumber(question.originalItemNumber)}
+              </span>
+              <span className="opacity-85 text-[11px]">
+                ({examPositionIndex}/{sameExamQuestions.length})
+              </span>
+              <ChevronDown
+                className={`w-4 h-4 transition-transform ${
+                  pickerOpen ? 'rotate-180' : ''
+                }`}
+              />
             </button>
 
-            <div
-              className={`min-h-[48px] px-3.5 sm:px-4 py-1.5 rounded-2xl border-2 flex items-center justify-center font-mono font-extrabold text-lg sm:text-xl text-white shadow-xs shrink-0 tabular-nums ${
-                isLavender
-                  ? 'bg-[#6A52A3] border-[#523B8C]'
-                  : 'bg-[#58CC02] border-[#46A302]'
-              }`}
-            >
-              {formatItemNumber(question.originalItemNumber)}
-            </div>
-
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                <span
-                  className={`text-sm sm:text-base font-extrabold ${
-                    isLavender ? 'text-[#14132E]' : 'text-[#1E1915]'
-                  }`}
-                >
-                  {question.examYear}년 3월 학력평가
-                </span>
-                <span
-                  className={`px-2 py-0.5 rounded-lg text-xs font-extrabold font-mono tabular-nums border ${
-                    isLavender
-                      ? 'bg-[#EAE3FA] border-[#C9B9E8] text-[#4B3B94]'
-                      : 'bg-[#FFF6DA] border-[#E0B94B] text-[#6B4A00]'
-                  }`}
-                >
-                  {examPositionIndex} / {sameExamQuestions.length}문항
-                </span>
-                <span
-                  className={`px-2 py-0.5 rounded-lg text-xs font-extrabold border tabular-nums ${
-                    question.points === 3
-                      ? 'bg-[#FFE5DD] border-[#E89B86] text-[#9A3218]'
-                      : isLavender
-                        ? 'bg-white border-[#D7D2EE] text-[#49467A]'
-                        : 'bg-[#FAFAFA] border-[#E5E5E5] text-[#5C4D42]'
-                  }`}
-                >
-                  {question.points}점 · {question.pages.map((p) => `${p}쪽`).join('–')}
-                </span>
-                {progress.completed && (
-                  <span className="px-2 py-0.5 rounded-lg text-xs font-extrabold bg-[#D7FFB8] border border-[#58CC02] text-[#1E4600] tabular-nums">
-                    ★{progress.stars} 완료
-                  </span>
-                )}
-              </div>
+            {pickerOpen && onSelectQuestion && (
               <div
-                className={`text-xs sm:text-sm font-bold mt-0.5 truncate ${
-                  isLavender ? 'text-[#5B48A3]' : 'text-[#6E5E52]'
+                className={`absolute left-0 top-full mt-2 z-40 w-[min(92vw,370px)] rounded-3xl border-2 bg-white p-3.5 shadow-xl space-y-3 ${
+                  isLavender ? 'border-[#C6BEE8]' : 'border-[#E5E5E5]'
                 }`}
               >
-                {question.sectionTitle} · {FORMAT_KO[question.format]}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="inline-flex rounded-xl border border-[#E5E5E5] bg-[#F7F7F7] p-0.5 gap-0.5">
+                    {(['2025', '2026'] as const).map((yr) => {
+                      const activeYr = pickerYear === yr;
+                      return (
+                        <button
+                          key={yr}
+                          type="button"
+                          onClick={() => setPickerYear(yr)}
+                          className={`px-3 py-1 rounded-lg text-xs font-extrabold cursor-pointer transition-colors ${
+                            activeYr
+                              ? yr === '2026'
+                                ? 'bg-[#6A52A3] text-white'
+                                : 'bg-[#58CC02] text-white'
+                              : 'text-[#5C4D42] hover:text-[#1E1915]'
+                          }`}
+                        >
+                          {yr}년 3월
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(false)}
+                    aria-label="문항 선택 닫기"
+                    className="w-7 h-7 rounded-lg border border-[#E5E5E5] flex items-center justify-center text-[#666666] hover:bg-[#F7F7F7] cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 px-1 text-xs font-bold text-[#5C4D42]">
+                  <span className="truncate">
+                    {question.sectionTitle} · {question.points}점 ·{' '}
+                    {question.pages.map((p) => `${p}쪽`).join('–')}
+                  </span>
+                  {progress.completed && (
+                    <span className="px-2 py-0.5 rounded-md bg-[#D7FFB8] text-[#1E4600] font-extrabold shrink-0">
+                      ★{progress.stars}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
+                  {pickerQuestions.map((q) => {
+                    const isCurrentItem = q.id === question.id;
+                    const isDoneItem = Boolean(progressById[q.id]?.completed);
+                    const shortNum = q.originalItemNumber.replace(/[^0-9]/g, '') || q.originalItemNumber;
+                    return (
+                      <button
+                        key={q.id}
+                        type="button"
+                        onClick={() => {
+                          onSelectQuestion(q.id);
+                          setPickerOpen(false);
+                        }}
+                        title={`${q.examYear}년 ${formatItemNumber(q.originalItemNumber)} · ${q.sectionTitle}`}
+                        aria-current={isCurrentItem ? 'step' : undefined}
+                        className={`h-9 rounded-xl border-2 text-xs font-mono font-extrabold transition-all cursor-pointer tabular-nums flex items-center justify-center ${
+                          isCurrentItem
+                            ? q.examYear === '2026'
+                              ? 'bg-[#6A52A3] border-[#4B3680] text-white ring-2 ring-[#C9B9E8]'
+                              : 'bg-[#58CC02] border-[#46A302] text-white ring-2 ring-[#A5ED6E]'
+                            : isDoneItem
+                              ? q.examYear === '2026'
+                                ? 'bg-[#EAE3FA] border-[#B4A3DE] text-[#3B2378] hover:border-[#6A52A3]'
+                                : 'bg-[#D7FFB8] border-[#8CE051] text-[#1E4600] hover:border-[#46A302]'
+                              : 'bg-white border-[#E5E5E5] text-[#4B4B4B] hover:border-[#1CB0F6]'
+                        }`}
+                      >
+                        {shortNum}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
-          {/* Right: Question Switcher (Always visible!) + Bookmark + Mute + XP */}
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {onSelectQuestion && (
+          {/* Thick Duolingo Progress Bar */}
+          <div className="flex-1 min-w-[110px] flex items-center gap-2">
+            <div
+              className={`flex-1 h-3.5 rounded-full overflow-hidden relative ${
+                isLavender ? 'bg-[#E5E2F4]' : 'bg-[#E5E5E5]'
+              }`}
+              role="progressbar"
+              aria-valuenow={lessonProgressPct}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label={`문제 진행률 ${lessonProgressPct}%`}
+            >
               <div
-                className={`inline-flex items-center rounded-2xl border-2 p-1 gap-1 ${
-                  isLavender
-                    ? 'bg-[#F3F1FC] border-[#C9C2E8]'
-                    : 'bg-[#FAFAFA] border-[#E5E5E5]'
+                className={`h-full rounded-full transition-all duration-300 relative overflow-hidden ${
+                  isLavender ? 'bg-[#7963A8]' : 'bg-[#58CC02]'
                 }`}
+                style={{ width: `${lessonProgressPct}%` }}
               >
+                <div className="absolute inset-x-2 top-1 h-1 rounded-full bg-white/35" />
+                {!reducedMotion && (
+                  <div
+                    aria-hidden="true"
+                    className="rq-progress-glint absolute inset-y-0 w-16 bg-gradient-to-r from-transparent via-white/45 to-transparent"
+                  />
+                )}
+              </div>
+            </div>
+            <span className="font-mono text-xs font-extrabold text-[#777777] tabular-nums shrink-0">
+              {lessonProgressPct}%
+            </span>
+            {currentStreak >= 1 && (
+              <span
+                title={`${currentStreak}연속 정답`}
+                className="hidden sm:inline-flex items-center gap-0.5 text-xs font-extrabold text-[#FF9600] tabular-nums shrink-0"
+              >
+                <Flame className="w-3.5 h-3.5 fill-[#FF9600]" />
+                {currentStreak}
+              </span>
+            )}
+          </div>
+
+          {/* Compact Right Utilities */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {onSelectQuestion && (
+              <div className="inline-flex items-center gap-1">
                 <button
                   type="button"
                   disabled={!prevGlobalQuestion}
                   onClick={() =>
                     prevGlobalQuestion && onSelectQuestion(prevGlobalQuestion.id)
                   }
-                  aria-label="이전 번호 문제"
+                  aria-label="이전 문제"
                   title={
                     prevGlobalQuestion
                       ? `이전: ${prevGlobalQuestion.examYear}년 ${formatItemNumber(prevGlobalQuestion.originalItemNumber)}`
-                      : '첫 번째 문제'
+                      : '첫 문제'
                   }
-                  className="w-8 h-8 rounded-xl bg-white border border-[#E5E5E5] flex items-center justify-center text-[#4B4B4B] disabled:opacity-40 cursor-pointer"
+                  className="w-9 h-9 rounded-xl bg-white border-2 border-[#E5E5E5] flex items-center justify-center text-[#4B4B4B] hover:border-[#1CB0F6] disabled:opacity-35 cursor-pointer"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <select
-                  value={question.id}
-                  onChange={(e) => onSelectQuestion(e.target.value)}
-                  aria-label="다른 문항 바로 이동"
-                  className="max-w-[150px] sm:max-w-[195px] h-8 px-1.5 text-xs sm:text-sm font-extrabold bg-transparent text-[#2D2620] focus:outline-none cursor-pointer"
-                >
-                  <optgroup label="2025년 3월 학력평가 (28문항)">
-                    {questions2025.map((q, idx) => (
-                      <option key={q.id} value={q.id}>
-                        2025 · {formatItemNumber(q.originalItemNumber)} ({idx + 1}/28) {q.sectionTitle}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="2026년 3월 학력평가 (28문항)">
-                    {questions2026.map((q, idx) => (
-                      <option key={q.id} value={q.id}>
-                        2026 · {formatItemNumber(q.originalItemNumber)} ({idx + 1}/28) {q.sectionTitle}
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
                 <button
                   type="button"
                   disabled={!nextGlobalQuestion}
                   onClick={() =>
                     nextGlobalQuestion && onSelectQuestion(nextGlobalQuestion.id)
                   }
-                  aria-label="다음 번호 문제"
+                  aria-label="다음 문제"
                   title={
                     nextGlobalQuestion
                       ? `다음: ${nextGlobalQuestion.examYear}년 ${formatItemNumber(nextGlobalQuestion.originalItemNumber)}`
                       : '마지막 문제'
                   }
-                  className="w-8 h-8 rounded-xl bg-white border border-[#E5E5E5] flex items-center justify-center text-[#4B4B4B] disabled:opacity-40 cursor-pointer"
+                  className="w-9 h-9 rounded-xl bg-white border-2 border-[#E5E5E5] flex items-center justify-center text-[#4B4B4B] hover:border-[#1CB0F6] disabled:opacity-35 cursor-pointer"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>
@@ -1030,9 +1273,9 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
               <button
                 type="button"
                 onClick={onToggleBookmark}
-                aria-label={isBookmarked ? '찜한 문제 해제' : '이 문제 찜하기'}
-                title={isBookmarked ? '찜 해제' : '이 문제 찜해두기'}
-                className={`dq-btn-3d min-h-[42px] px-3 py-1.5 rounded-2xl border-2 text-xs sm:text-sm font-extrabold inline-flex items-center gap-1 cursor-pointer ${
+                aria-label={isBookmarked ? '찜 해제' : '찜하기'}
+                title={isBookmarked ? '찜 해제' : '찜하기'}
+                className={`w-9 h-9 rounded-xl border-2 flex items-center justify-center cursor-pointer ${
                   isBookmarked
                     ? 'bg-[#FFE18A] border-[#C9961A] text-[#5C3D00]'
                     : 'bg-white border-[#E5E5E5] text-[#5C4D42] hover:border-[#FFC800]'
@@ -1043,9 +1286,6 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                     isBookmarked ? 'fill-[#C9961A] text-[#5C3D00]' : ''
                   }`}
                 />
-                <span className="hidden sm:inline">
-                  {isBookmarked ? '찜함' : '찜하기'}
-                </span>
               </button>
             )}
 
@@ -1055,7 +1295,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                 onClick={onToggleMute}
                 aria-label={masterMuted ? '소리 켜기' : '음소거'}
                 title={masterMuted ? '소리 켜기' : '음소거'}
-                className={`dq-btn-3d min-w-[42px] min-h-[42px] px-2.5 rounded-2xl border-2 flex items-center justify-center cursor-pointer ${
+                className={`w-9 h-9 rounded-xl border-2 flex items-center justify-center cursor-pointer ${
                   masterMuted
                     ? 'border-[#FF4B4B] bg-[#FFDFE0] text-[#9A1B1B]'
                     : 'border-[#E5E5E5] bg-white text-[#5C4D42] hover:border-[#1CB0F6]'
@@ -1070,7 +1310,25 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
             )}
 
             <div
-              className={`min-h-[42px] px-3.5 py-1.5 rounded-2xl border-2 text-sm font-extrabold font-mono tabular-nums inline-flex items-center shrink-0 ${
+              className={`hidden md:inline-flex items-center gap-1.5 h-9 px-2.5 rounded-xl border-2 text-xs font-extrabold whitespace-nowrap shrink-0 ${
+                isLavender
+                  ? 'bg-[#F2F0FC] border-[#C9B9E8] text-[#211442]'
+                  : 'bg-[#FFFDF8] border-[#EAE0D0] text-[#2D2620]'
+              }`}
+              title={`${nickname} · LV.${level}`}
+            >
+              <span
+                className={`font-mono px-1.5 py-0.5 rounded-md text-[10px] text-white ${
+                  isLavender ? 'bg-[#7963A8]' : 'bg-[#58CC02]'
+                }`}
+              >
+                LV.{level}
+              </span>
+              <span className="max-w-[78px] truncate">{nickname}</span>
+            </div>
+
+            <div
+              className={`h-9 px-2.5 rounded-xl border-2 text-xs sm:text-sm font-extrabold font-mono tabular-nums inline-flex items-center shrink-0 ${
                 isLavender
                   ? 'bg-[#F2F0FC] border-[#C9B9E8] text-[#1D1540]'
                   : 'bg-[#FFF9EF] border-[#E5E5E5] text-[#1E1915]'
@@ -1081,162 +1339,114 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
           </div>
         </div>
 
-        {/* Row 2: Visual 28-Question Exam Position Map Strip (Instant spatial awareness) */}
-        {onSelectQuestion && sameExamQuestions.length > 0 && (
-          <div className="space-y-1.5">
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-extrabold">
-              <span className={isLavender ? 'text-[#4B3B94]' : 'text-[#5C4D42]'}>
-                {question.examYear}년 시험지 문항 위치 ({examPositionIndex} / {sameExamQuestions.length})
-              </span>
-              <span className="text-[#777777] font-semibold">
-                번호를 누르면 바로 이동해요
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-              {sameExamQuestions.map((q) => {
-                const isCurrentItem = q.id === question.id;
-                const isDoneItem = Boolean(progressById[q.id]?.completed);
-                const shortNum = q.originalItemNumber.replace(/\s+/g, '');
-                return (
-                  <button
-                    key={q.id}
-                    type="button"
-                    onClick={() => onSelectQuestion(q.id)}
-                    title={`${q.sourceExam} · ${q.sectionTitle}`}
-                    aria-current={isCurrentItem ? 'step' : undefined}
-                    className={`min-w-[34px] h-8 px-2 rounded-xl border-2 text-xs font-mono font-extrabold shrink-0 transition-all cursor-pointer tabular-nums ${
-                      isCurrentItem
-                        ? isLavender
-                          ? 'bg-[#6A52A3] border-[#4B3680] text-white shadow-xs scale-105'
-                          : 'bg-[#58CC02] border-[#46A302] text-white shadow-xs scale-105'
-                        : isDoneItem
-                          ? isLavender
-                            ? 'bg-[#EAE3FA] border-[#B4A3DE] text-[#3B2378] hover:border-[#6A52A3]'
-                            : 'bg-[#D7FFB8] border-[#8CE051] text-[#1E4600] hover:border-[#46A302]'
-                          : isLavender
-                            ? 'bg-white border-[#DDD9EE] text-[#49467A] hover:border-[#6A52A3]'
-                            : 'bg-white border-[#E5E5E5] text-[#5C4D42] hover:border-[#1CB0F6]'
-                    }`}
-                  >
-                    {shortNum}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Row 3: Current Question Lesson Progress Bar + Streak */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between gap-2 text-xs sm:text-sm font-extrabold">
-            <div className="flex items-center gap-2 min-w-0 truncate">
-              <span className={isLavender ? 'text-[#5E48A3]' : 'text-[#58A700]'}>
-                현재 문제 진행 · {stageInfo.code} {stageInfo.titleKo}
-              </span>
-              {currentStreak >= 1 && (
-                <>
-                  <span className="text-[#B8B8B8]" aria-hidden="true">·</span>
-                  <span className="inline-flex items-center gap-1 text-[#FF9600] shrink-0">
-                    <Flame className="w-4 h-4 fill-[#FF9600]" />
-                    <span>{currentStreak}연속 정답!</span>
+        {/* Row 2: Compact 4-Step Tabs + Short Verb/Icon Utility Buttons */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#EFEAE0]">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+            {STAGE_META.map((st) => {
+              const isCurrent = st.index === stage;
+              const isStepCompleted =
+                (st.index === 0 && isStage0Done) ||
+                (st.index === 1 && isStage1Done) ||
+                (st.index === 2 && isStage2Done) ||
+                (st.index === 3 && isStage2Done);
+              return (
+                <button
+                  key={st.code}
+                  type="button"
+                  onClick={() => handleGuardedStageChange(st.index)}
+                  title={`${st.titleKo} 단계로 이동`}
+                  className={`dq-btn-3d min-h-[38px] px-3 py-1.5 rounded-xl border-2 text-xs sm:text-sm font-extrabold whitespace-nowrap inline-flex items-center gap-1.5 shrink-0 cursor-pointer transition-all ${
+                    isCurrent
+                      ? isLavender
+                        ? 'bg-[#EAE3FA] border-[#6A52A3] text-[#1A1038]'
+                        : 'bg-[#DDF4FF] border-[#1CB0F6] text-[#143752]'
+                      : isStepCompleted
+                        ? 'bg-[#D7FFB8] border-[#58CC02] text-[#1E4600]'
+                        : 'bg-white border-[#E5E5E5] text-[#4B4B4B] hover:border-[#1CB0F6]'
+                  }`}
+                >
+                  <span className="tabular-nums">
+                    0{st.index + 1} {stageShortTitles[st.index] ?? st.titleKo}
                   </span>
-                </>
-              )}
-            </div>
-            <span className="font-mono text-xs sm:text-sm text-[#777777] tabular-nums shrink-0">
-              {lessonProgressPct}%
-            </span>
+                  {isStepCompleted && !isCurrent && (
+                    <Check className="w-3.5 h-3.5 shrink-0 text-[#46A302]" />
+                  )}
+                </button>
+              );
+            })}
           </div>
 
-          <div
-            className={`h-3.5 rounded-full overflow-hidden relative ${
-              isLavender ? 'bg-[#E5E2F4]' : 'bg-[#E5E5E5]'
-            }`}
-            role="progressbar"
-            aria-valuenow={lessonProgressPct}
-            aria-valuemin={0}
-            aria-valuemax={100}
-          >
-            <div
-              className={`h-full rounded-full transition-all duration-300 relative overflow-hidden ${
-                isLavender ? 'bg-[#7963A8]' : 'bg-[#58CC02]'
-              }`}
-              style={{ width: `${lessonProgressPct}%` }}
-            >
-              <div className="absolute inset-x-2 top-1 h-1 rounded-full bg-white/35" />
-              {!reducedMotion && (
-                <div
-                  aria-hidden="true"
-                  className="rq-progress-glint absolute inset-y-0 w-16 bg-gradient-to-r from-transparent via-white/45 to-transparent"
-                />
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Row 4: Large Side-by-Side Exam Sheet Controls + Beginner Hint Sheet + Tutorial */}
-        <div
-          className={`rounded-2xl border-2 p-3 flex flex-wrap items-center justify-between gap-2.5 ${
-            isLavender
-              ? 'bg-[#F1EFFC] border-[#D2CCE8]'
-              : 'bg-[#FAFAFA] border-[#E5E5E5]'
-          }`}
-        >
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             {(stage === 0 || stage === 1 || stage === 2) && (
               <>
                 <button
                   type="button"
                   onClick={() => setSplitPngOpen((v) => !v)}
-                  className={`dq-btn-3d hidden lg:inline-flex items-center gap-2 min-h-[48px] px-5 py-2.5 rounded-2xl border-2 text-sm sm:text-base font-extrabold whitespace-nowrap cursor-pointer ${
+                  className={`hidden lg:inline-flex items-center gap-1.5 min-h-[38px] px-3 py-1.5 rounded-xl border-2 text-xs sm:text-sm font-extrabold whitespace-nowrap cursor-pointer ${
                     splitPngOpen
                       ? isLavender
                         ? 'bg-[#D6E8FC] border-[#4A80C2] text-[#102E54]'
                         : 'bg-[#DDF4FF] border-[#1CB0F6] text-[#143752]'
-                      : isLavender
-                        ? 'bg-white border-[#C9C2E8] text-[#3B386B]'
-                        : 'bg-white border-[#E5E5E5] text-[#4B4B4B]'
+                      : 'bg-white border-[#E5E5E5] text-[#4B4B4B]'
                   }`}
                 >
-                  <Columns2 className="w-5 h-5 shrink-0" />
-                  <span>
-                    {splitPngOpen
-                      ? '시험지 나란히 보기 켜짐'
-                      : '시험지와 나란히 보기 켜기'}
-                  </span>
+                  <Columns2 className="w-4 h-4 shrink-0" />
+                  <span>시험지</span>
                 </button>
 
                 {splitPngOpen && (
                   <div
-                    className={`hidden lg:inline-flex items-center rounded-2xl border-2 p-1 gap-1 bg-white ${
+                    className={`hidden lg:inline-flex items-center rounded-xl border-2 p-0.5 gap-0.5 bg-white ${
                       isLavender ? 'border-[#C6BEE8]' : 'border-[#E5E5E5]'
                     }`}
+                    title="시험지 가로 너비 조절 (작게 · 보통 · 크게)"
                   >
+                    {[
+                      { label: '작게', pct: 34 },
+                      { label: '보통', pct: 46 },
+                      { label: '크게', pct: 58 },
+                    ].map((preset) => {
+                      const isPresetActive = Math.abs(examPanePct - preset.pct) <= 2;
+                      return (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() => setExamPanePct(preset.pct)}
+                          className={`min-h-[30px] px-2.5 py-1 rounded-lg text-xs font-extrabold transition-colors cursor-pointer ${
+                            isPresetActive
+                              ? isLavender
+                                ? 'bg-[#C9B9E8] text-[#211442]'
+                                : 'bg-[#DDF4FF] text-[#143752]'
+                              : 'text-[#666666] hover:bg-[#F7F7F7]'
+                          }`}
+                        >
+                          {preset.label}
+                        </button>
+                      );
+                    })}
+                    <span className="h-4 w-px bg-[#E5E5E5] mx-0.5" aria-hidden="true" />
                     <button
                       type="button"
-                      onClick={() => setExamPaneSize('normal')}
-                      className={`min-h-[38px] px-4 py-1.5 rounded-xl text-sm font-extrabold transition-colors cursor-pointer ${
-                        examPaneSize === 'normal'
-                          ? isLavender
-                            ? 'bg-[#C9B9E8] text-[#211442]'
-                            : 'bg-[#DDF4FF] text-[#143752]'
-                          : 'text-[#666666] hover:bg-[#F7F7F7]'
-                      }`}
+                      disabled={examPanePct <= 28}
+                      onClick={() => setExamPanePct((p) => Math.max(28, p - 4))}
+                      aria-label="시험지 가로 너비 줄이기"
+                      title="시험지 가로 너비 줄이기"
+                      className="w-7 h-[30px] rounded-lg text-[#5C4D42] hover:bg-[#F7F7F7] disabled:opacity-35 flex items-center justify-center cursor-pointer"
                     >
-                      나란히 1:1
+                      <Minus className="w-3.5 h-3.5" />
                     </button>
+                    <span className="px-1 text-[11px] font-mono font-extrabold tabular-nums text-[#5C4D42]">
+                      {examPanePct}%
+                    </span>
                     <button
                       type="button"
-                      onClick={() => setExamPaneSize('wide')}
-                      className={`min-h-[38px] px-4 py-1.5 rounded-xl text-sm font-extrabold transition-colors cursor-pointer ${
-                        examPaneSize === 'wide'
-                          ? isLavender
-                            ? 'bg-[#C9B9E8] text-[#211442]'
-                            : 'bg-[#DDF4FF] text-[#143752]'
-                          : 'text-[#666666] hover:bg-[#F7F7F7]'
-                      }`}
+                      disabled={examPanePct >= 64}
+                      onClick={() => setExamPanePct((p) => Math.min(64, p + 4))}
+                      aria-label="시험지 가로 너비 넓히기"
+                      title="시험지 가로 너비 넓히기"
+                      className="w-7 h-[30px] rounded-lg text-[#5C4D42] hover:bg-[#F7F7F7] disabled:opacity-35 flex items-center justify-center cursor-pointer"
                     >
-                      시험지 크게 (넓게)
+                      <Plus className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 )}
@@ -1244,21 +1454,19 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                 <button
                   type="button"
                   onClick={() => setPngModalOpen(true)}
-                  className="dq-btn-3d inline-flex items-center gap-2 min-h-[48px] px-4 py-2.5 rounded-2xl border-2 bg-white border-[#E5E5E5] hover:border-[#1CB0F6] text-sm sm:text-base font-extrabold text-[#143752] whitespace-nowrap cursor-pointer"
+                  className="inline-flex items-center gap-1.5 min-h-[38px] px-3 py-1.5 rounded-xl border-2 bg-white border-[#E5E5E5] hover:border-[#1CB0F6] text-xs sm:text-sm font-extrabold text-[#143752] whitespace-nowrap cursor-pointer"
                 >
-                  <Maximize2 className="w-5 h-5 shrink-0 text-[#1CB0F6]" />
-                  <span>시험지 전체 화면</span>
+                  <Maximize2 className="w-4 h-4 shrink-0 text-[#1CB0F6]" />
+                  <span>전체</span>
                 </button>
               </>
             )}
-          </div>
 
-          <div className="flex flex-wrap items-center gap-2">
             {onOpenTutorial && (
               <button
                 type="button"
                 onClick={onOpenTutorial}
-                className="dq-btn-3d min-h-[48px] px-4 py-2.5 rounded-2xl bg-white border-2 border-[#E5E5E5] hover:border-[#58CC02] text-[#4B4B4B] text-sm font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
+                className="min-h-[38px] px-3 py-1.5 rounded-xl bg-white border-2 border-[#E5E5E5] hover:border-[#58CC02] text-[#4B4B4B] text-xs sm:text-sm font-extrabold inline-flex items-center gap-1 cursor-pointer"
               >
                 <HelpCircle className="w-4 h-4 text-[#58CC02]" />
                 <span>푸는 법</span>
@@ -1268,78 +1476,133 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
             <button
               type="button"
               onClick={() => setBeginnerHintOpen(true)}
-              className="dq-btn-3d min-h-[48px] px-5 py-2.5 rounded-2xl bg-[#FFE18A] border-2 border-[#D4A72C] text-[#2D2620] text-sm sm:text-base font-extrabold inline-flex items-center gap-2 cursor-pointer"
+              className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-[#FFE18A] border-2 border-[#D4A72C] text-[#2D2620] text-xs sm:text-sm font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
             >
-              <BookOpen className="w-5 h-5 text-[#8A5A00] shrink-0" />
-              <span>쉬운 해석 · 단어 힌트</span>
+              <BookOpen className="w-4 h-4 text-[#8A5A00] shrink-0" />
+              <span>힌트</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setBboxDebugOpen((v) => {
+                  const next = !v;
+                  if (next) {
+                    setSplitPngOpen(true);
+                    setMobileInlinePng(true);
+                  }
+                  return next;
+                });
+              }}
+              aria-pressed={bboxDebugOpen}
+              title="문항 오버레이 좌표(bbox) 1px 단위 미세 조정 패널"
+              className={`min-h-[38px] px-3 py-1.5 rounded-xl border-2 text-xs sm:text-sm font-extrabold inline-flex items-center gap-1.5 cursor-pointer transition-colors ${
+                bboxDebugOpen
+                  ? 'bg-[#FFE4E6] border-[#E11D48] text-[#9F1239]'
+                  : 'bg-white border-[#E5E5E5] hover:border-[#FDA4AF] text-[#5C4D42]'
+              }`}
+            >
+              <ScanSearch className="w-4 h-4 shrink-0" />
+              <span>좌표 오프셋</span>
             </button>
           </div>
         </div>
-
-        {/* Row 5: 4-Stage Stepper Pills (Free navigation across all 4 steps) */}
-        <div className="flex sm:grid sm:grid-cols-4 gap-2.5 overflow-x-auto pb-0.5">
-          {STAGE_META.map((st) => {
-            const isCurrent = st.index === stage;
-            const isStepCompleted =
-              (st.index === 0 && isStage0Done) ||
-              (st.index === 1 && isStage1Done) ||
-              (st.index === 2 && isStage2Done) ||
-              (st.index === 3 && isStage2Done);
-            return (
-              <button
-                key={st.code}
-                type="button"
-                onClick={() => handleGuardedStageChange(st.index)}
-                title={`${st.titleKo} 단계로 이동`}
-                className={`min-w-[145px] sm:min-w-0 min-h-[52px] text-left px-4 py-2.5 rounded-2xl border-2 transition-all shrink-0 cursor-pointer ${
-                  isCurrent
-                    ? isLavender
-                      ? 'dq-btn-3d bg-[#EAE3FA] border-[#6A52A3] text-[#1A1038]'
-                      : 'dq-btn-3d bg-[#DDF4FF] border-[#1CB0F6] text-[#143752]'
-                    : isStepCompleted
-                      ? 'dq-btn-3d bg-[#D7FFB8] border-[#58CC02] text-[#1E4600]'
-                      : 'dq-btn-3d bg-white border-[#E5E5E5] text-[#4B4B4B] hover:border-[#1CB0F6]'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-extrabold tabular-nums">
-                    0{st.index + 1} · {st.titleKo}
-                  </span>
-                  {isStepCompleted && !isCurrent && (
-                    <Check className="w-4 h-4 shrink-0 text-[#46A302]" />
-                  )}
-                </div>
-              </button>
-            );
-          })}
-        </div>
       </div>
 
-      {/* Main Content Area: Exam PNG + Duolingo Lesson Card */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+      {bboxDebugOpen && (
+        <BboxDebugPanel
+          question={question}
+          activePage={activePngPage}
+          imageDims={imageDims}
+          offset={activeBboxOffset}
+          savedCount={Object.keys(debugDeltaByKey).length}
+          onChangeOffset={handleChangeBboxOffset}
+          onResetOffset={handleResetBboxOffset}
+          onResetAllOffsets={handleResetAllBboxOffsets}
+          onClose={() => setBboxDebugOpen(false)}
+        />
+      )}
+
+      {/* Main Content Area: Exam PNG + Resizable Splitter + Duolingo Lesson Card */}
+      <div
+        ref={splitContainerRef}
+        style={
+          showSplitPane
+            ? ({ '--exam-pane-pct': `${examPanePct}%` } as React.CSSProperties)
+            : undefined
+        }
+        className={
+          showSplitPane
+            ? 'flex flex-col lg:flex-row lg:items-start gap-4 lg:gap-0 min-w-0'
+            : 'grid grid-cols-1 lg:grid-cols-12 gap-5 items-start min-w-0'
+        }
+      >
         {showSplitPane && (
-          <div
-            className={`hidden lg:block ${examPaneColClass} h-[760px] xl:h-[820px] sticky top-6`}
-          >
-            <PngViewer
-              pages={question.pages}
-              targetExamLabel={`${question.sourceExam} (${formatItemNumber(question.originalItemNumber)})`}
-              targetQuestionId={question.id}
-              islandTheme={islandTheme}
-            />
-          </div>
+          <>
+            <div className="hidden lg:block lg:w-[var(--exam-pane-pct)] lg:shrink-0 h-[760px] xl:h-[820px] sticky top-6 min-w-0">
+              <PngViewer
+                pages={question.pages}
+                targetExamLabel={`${question.sourceExam} (${formatItemNumber(question.originalItemNumber)})`}
+                targetQuestionId={question.id}
+                islandTheme={islandTheme}
+                bboxDebug={bboxDebugOpen}
+                bboxOffset={bboxDebugOpen ? activeBboxOffset : undefined}
+                offsetsByKey={debugDeltaByKey}
+                onActivePageChange={setActivePngPage}
+                onImageDimensionsChange={setImageDims}
+                onSelectDebugQuestion={onSelectQuestion}
+              />
+            </div>
+
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="시험지 가로 너비 조절"
+              aria-valuemin={28}
+              aria-valuemax={64}
+              aria-valuenow={examPanePct}
+              tabIndex={0}
+              title="드래그하여 시험지 가로 너비 조절 (더블클릭: 46%)"
+              onPointerDown={handleStartSplitDrag}
+              onDoubleClick={() => setExamPanePct(46)}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowLeft') {
+                  e.preventDefault();
+                  setExamPanePct((p) => Math.max(28, p - 3));
+                } else if (e.key === 'ArrowRight') {
+                  e.preventDefault();
+                  setExamPanePct((p) => Math.min(64, p + 3));
+                }
+              }}
+              className={`hidden lg:flex w-4 shrink-0 self-stretch items-center justify-center cursor-col-resize select-none group touch-none ${
+                isResizingSplit ? 'bg-[#1CB0F6]/10 rounded-full' : ''
+              }`}
+            >
+              <div
+                className={`w-1.5 h-20 rounded-full transition-colors ${
+                  isResizingSplit
+                    ? 'bg-[#1CB0F6]'
+                    : isLavender
+                      ? 'bg-[#D2CAE8] group-hover:bg-[#6A52A3]'
+                      : 'bg-[#DFD6C7] group-hover:bg-[#1CB0F6]'
+                }`}
+              />
+            </div>
+          </>
         )}
 
         <section
           ref={stageCardRef}
-          className={`${workPaneColClass} rounded-3xl border-2 bg-white overflow-x-clip shadow-xs scroll-mt-24 ${
-            isLavender ? 'border-[#C6BEE8] !bg-[#FCFBFF]' : 'border-[#E5E5E5]'
+          className={`${
+            showSplitPane ? 'flex-1 min-w-0 w-full' : 'lg:col-span-8 min-w-0 w-full'
+          } clay-card rounded-3xl border-2 bg-white overflow-x-clip scroll-mt-24 ${
+            isLavender ? '!border-[#C6BEE8] !bg-[#FCFBFF]' : '!border-[#E5E5E5]'
           }`}
         >
           {/* Animated Workbook Page Wrapper (Stage & Sub-Page Book Flip Motion Graphic) */}
           <div
             key={`${question.id}-page-${activePageKey}`}
-            className={`relative overflow-hidden ${stageAnimClass}`}
+            className={`relative overflow-x-clip min-w-0 ${stageAnimClass}`}
           >
             {!reducedMotion && pageTurnDir !== 'none' && (
               <>
@@ -1354,76 +1617,67 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
               </>
             )}
 
-            <div className="p-5 sm:p-7 space-y-6">
+            <div className="p-4 sm:p-6 space-y-6 min-w-0">
               {/* Crisp Page Title + Compact Page Counter Badge */}
-              <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b-2 border-[#F0ECE4]">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={`text-xs sm:text-sm font-mono font-extrabold px-2.5 py-0.5 rounded-lg border tabular-nums ${
-                        isLavender
-                          ? 'bg-[#6A52A3] border-[#523B8C] text-white'
-                          : 'bg-[#58CC02] border-[#46A302] text-white'
-                      }`}
-                    >
-                      {formatItemNumber(question.originalItemNumber)}
-                    </span>
-                    <h1
-                      className={`text-xl sm:text-2xl font-extrabold ${
-                        isLavender ? 'text-[#14132E]' : 'text-[#1E1915]'
-                      }`}
-                    >
-                      {currentPageMeta.titleKo}
-                    </h1>
-                    <span
-                      className={`text-xs font-extrabold px-2.5 py-0.5 rounded-lg border tabular-nums ${
-                        isLavender
-                          ? 'bg-[#F3F1FC] border-[#C9C2E8] text-[#49467A]'
-                          : 'bg-[#FFF9EF] border-[#E5E5E5] text-[#5C4D42]'
-                      }`}
-                    >
-                      {activePageIdx + 1} / {pagesList.length} 페이지
-                    </span>
-                  </div>
-                  <p
-                    className={`text-sm mt-1 font-semibold ${
-                      isLavender ? 'text-[#49467A]' : 'text-[#6E5E52]'
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b-2 border-[#F0ECE4]">
+                <div className="flex flex-wrap items-center gap-2 min-w-0">
+                  <span
+                    className={`text-xs sm:text-sm font-mono font-extrabold px-2.5 py-0.5 rounded-lg border tabular-nums ${
+                      isLavender
+                        ? 'bg-[#6A52A3] border-[#523B8C] text-white'
+                        : 'bg-[#58CC02] border-[#46A302] text-white'
                     }`}
                   >
-                    {currentPageMeta.subtitleKo}
-                  </p>
+                    {formatItemNumber(question.originalItemNumber)}
+                  </span>
+                  <h1
+                    className={`text-lg sm:text-xl font-extrabold ${
+                      isLavender ? 'text-[#14132E]' : 'text-[#1E1915]'
+                    }`}
+                  >
+                    {currentPageMeta.titleKo}
+                  </h1>
+                  <span
+                    className={`text-xs font-extrabold px-2 py-0.5 rounded-lg border tabular-nums ${
+                      isLavender
+                        ? 'bg-[#F3F1FC] border-[#C9C2E8] text-[#49467A]'
+                        : 'bg-[#FFF9EF] border-[#E5E5E5] text-[#5C4D42]'
+                    }`}
+                  >
+                    {activePageIdx + 1}/{pagesList.length}
+                  </span>
                 </div>
                 <span
                   className={`text-xs sm:text-sm font-extrabold tabular-nums ${
                     isLavender ? 'text-[#5E48A3]' : 'text-[#6E5E52]'
                   }`}
                 >
-                  {question.sectionTitle} · {FORMAT_KO[question.format]}
+                  {question.sectionTitle} · {question.points}점
                 </span>
               </div>
 
               {/* Mobile/Tablet Inline Collapsible Original Passage */}
               {(stage === 0 || stage === 1 || stage === 2) && (
                 <div className="lg:hidden rounded-2xl border-2 border-[#84D8FF] bg-[#F2FAFF] overflow-hidden">
-                  <div className="flex flex-wrap items-center justify-between gap-2 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-2.5">
                     <button
                       type="button"
                       onClick={() => setMobileInlinePng((v) => !v)}
-                      className="flex-1 min-h-[44px] text-left text-sm font-extrabold text-[#143752] inline-flex items-center gap-2 cursor-pointer"
+                      className="flex-1 min-h-[42px] text-left text-sm font-extrabold text-[#143752] inline-flex items-center gap-2 cursor-pointer"
                     >
                       <FileImage className="w-5 h-5 shrink-0 text-[#1CB0F6]" />
                       <span>
                         {mobileInlinePng
-                          ? '원본 시험지 접기'
-                          : `원본 시험지 펼쳐보기 (${question.pages.map((p) => `${p}p`).join('–')})`}
+                          ? '시험지 접기'
+                          : `시험지 보기 (${question.pages.map((p) => `${p}쪽`).join('–')})`}
                       </span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setPngModalOpen(true)}
-                      className="min-h-[42px] px-4 py-2 rounded-xl bg-white border-2 border-[#84D8FF] text-sm font-extrabold text-[#143752] cursor-pointer"
+                      className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-white border-2 border-[#84D8FF] text-sm font-extrabold text-[#143752] cursor-pointer"
                     >
-                      전체 화면
+                      전체
                     </button>
                   </div>
                   {mobileInlinePng && (
@@ -1433,6 +1687,12 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                         targetExamLabel={`${question.sourceExam} (${formatItemNumber(question.originalItemNumber)})`}
                         targetQuestionId={question.id}
                         islandTheme={islandTheme}
+                        bboxDebug={bboxDebugOpen}
+                        bboxOffset={bboxDebugOpen ? activeBboxOffset : undefined}
+                        offsetsByKey={debugDeltaByKey}
+                        onActivePageChange={setActivePngPage}
+                        onImageDimensionsChange={setImageDims}
+                        onSelectDebugQuestion={onSelectQuestion}
                       />
                     </div>
                   )}
@@ -1443,7 +1703,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
               {stage === 0 && (
                 <div className="space-y-5">
                   {renderFoxPromptBubble(
-                    question.setRangeLabel || '1단계 · 발문과 핵심 단서 확인',
+                    question.setRangeLabel || '1단계 · 핵심 단서',
                     question.prompt,
                     question.underlinedTargets,
                   )}
@@ -1457,7 +1717,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                           isLavender ? 'text-[#14132E]' : 'text-[#1E1915]'
                         }`}
                       >
-                        단서 카드를 눌러 뜻을 확인해 보세요 (다 안 열어도 바로 풀 수 있어요 · 1개당 +5 XP)
+                        단서 카드 (+5 XP)
                       </span>
                       <div className="flex items-center gap-2.5">
                         <span
@@ -1476,7 +1736,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                               : 'bg-[#EEFFD9] border-[#58CC02] text-[#285E00] hover:bg-[#D7FFB8]'
                           }`}
                         >
-                          바로 문제 풀기 ▶
+                          바로 풀기 ▶
                         </button>
                       </div>
                     </div>
@@ -1577,7 +1837,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                         return (
                           <div
                             key={clue.key}
-                            className={`relative rounded-2xl border-2 transition-all flex flex-col ${
+                            className={`rq-hover-lift relative rounded-2xl border-2 transition-all flex flex-col min-w-0 ${
                               isKeyFocusCard ? 'sm:col-span-2' : ''
                             } ${
                               isCollected
@@ -1604,9 +1864,9 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                             <button
                               type="button"
                               onClick={() => onCollectClue(clue.key)}
-                              className="w-full text-left p-4 sm:p-5 min-h-[120px] cursor-pointer flex flex-col justify-between gap-2 rounded-2xl"
+                              className="w-full min-w-0 text-left p-4 sm:p-5 min-h-[120px] cursor-pointer flex flex-col justify-between gap-2 rounded-2xl"
                             >
-                              <div className={`flex items-center justify-between gap-2 w-full ${clue.audioTerm && ttsAvailable ? 'pr-16' : ''}`}>
+                              <div className={`flex flex-wrap items-center justify-between gap-2 w-full min-w-0 ${clue.audioTerm && ttsAvailable ? 'pr-16' : ''}`}>
                                 <span
                                   className={`text-xs sm:text-sm font-extrabold ${
                                     isLavender ? 'text-[#5B48A3]' : 'text-[#777777]'
@@ -1615,7 +1875,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                                   {clue.kind}
                                 </span>
                                 <span
-                                  className={`text-xs sm:text-sm font-extrabold inline-flex items-center gap-1 ${
+                                  className={`text-xs sm:text-sm font-extrabold inline-flex items-center gap-1 shrink-0 ${
                                     isCollected
                                       ? isLavender
                                         ? 'text-[#2B5FA8]'
@@ -1639,14 +1899,14 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                                 </span>
                               </div>
                               <div
-                                className={`text-base sm:text-lg font-extrabold ${
+                                className={`text-base sm:text-lg font-extrabold break-words [overflow-wrap:anywhere] ${
                                   isLavender ? 'text-[#14132E]' : 'text-[#1E1915]'
                                 }`}
                               >
                                 {clue.title}
                               </div>
                               <p
-                                className={`text-sm leading-relaxed ${
+                                className={`text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${
                                   isLavender ? 'text-[#2E2D59]' : 'text-[#4B4B4B]'
                                 }`}
                               >
@@ -1683,7 +1943,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                               : 'bg-white border-[#E5E5E5] text-[#4B4B4B]'
                           }`}
                         >
-                          <span>2-1. 글 흐름 보기</span>
+                          <span>글 흐름</span>
                           {progress.storyChecked && (
                             <CheckCircle2 className="w-4 h-4 text-[#46A302]" />
                           )}
@@ -1691,7 +1951,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                         <button
                           type="button"
                           onClick={() => setStage1SubPage('sentence')}
-                          className={`dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl border-2 text-sm sm:text-base font-extrabold cursor-pointer flex items-center justify-center gap-2 ${
+                          className={`dq-btn-3d min-h-[44px] px-4 py-2 rounded-2xl border-2 text-sm sm:text-base font-extrabold cursor-pointer flex items-center justify-center gap-2 ${
                             activePageKey === 'sentence'
                               ? isLavender
                                 ? 'bg-[#EAE3FA] border-[#6A52A3] text-[#1A1038]'
@@ -1699,23 +1959,11 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                               : 'bg-white border-[#E5E5E5] text-[#4B4B4B]'
                           }`}
                         >
-                          <span>2-2. 의미 단위 해석</span>
+                          <span>문장 해석</span>
                           {currentLabDraft.sentenceCompleted && (
                             <CheckCircle2 className="w-4 h-4 text-[#46A302]" />
                           )}
                         </button>
-                      </div>
-                      <div
-                        className={`rounded-xl border px-3.5 py-2 text-xs sm:text-sm font-bold flex items-center gap-2 ${
-                          isLavender
-                            ? 'bg-[#F5F3FC] border-[#D7D2EE] text-[#49467A]'
-                            : 'bg-[#FFFDF4] border-[#EDE0B8] text-[#6B5000]'
-                        }`}
-                      >
-                        <Sparkles className="w-4 h-4 shrink-0" />
-                        <span>
-                          2-1(글 흐름 정리)와 2-2(핵심 문장 해석) 중 필요한 것만 살펴보고 3단계 문제 풀기로 넘어가세요!
-                        </span>
                       </div>
                     </div>
                   )}
@@ -1737,8 +1985,8 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                       }
                       nextStepLabel={
                         currentSentenceAnalysis
-                          ? '다음: 핵심 문장 해석하기'
-                          : '다음: 문제 풀고 답 고르기'
+                          ? '문장 해석'
+                          : '문제 풀기'
                       }
                       onSkipToBoss={() => handleGuardedStageChange(2)}
                       islandTheme={islandTheme}
@@ -1789,7 +2037,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                           isLavender ? 'text-[#5E48A3]' : 'text-[#1CB0F6]'
                         }`}
                       />
-                      <span>실전 집중 타이머</span>
+                      <span>타이머</span>
                       <span
                         className={`font-mono text-base font-extrabold tabular-nums ${
                           secondsLeft <= 15 && timerActive
@@ -1810,10 +2058,10 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                           if (secondsLeft === 0) setSecondsLeft(90);
                           setTimerActive((v) => !v);
                         }}
-                        className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-white border-2 border-[#E5E5E5] hover:border-[#1CB0F6] text-sm font-extrabold text-[#1E1915] inline-flex items-center gap-1.5 cursor-pointer"
+                        className="min-h-[38px] px-3 py-1 rounded-xl bg-white border-2 border-[#E5E5E5] hover:border-[#1CB0F6] text-xs sm:text-sm font-extrabold text-[#1E1915] inline-flex items-center gap-1.5 cursor-pointer"
                       >
-                        <Play className="w-4 h-4" />
-                        <span>{timerActive ? '일시정지' : '시작'}</span>
+                        <Play className="w-3.5 h-3.5" />
+                        <span>{timerActive ? '정지' : '시작'}</span>
                       </button>
                       <button
                         type="button"
@@ -1821,25 +2069,25 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                           setTimerActive(false);
                           setSecondsLeft(90);
                         }}
-                        className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-white border-2 border-[#E5E5E5] text-sm font-bold text-[#666666] hover:text-[#1E1915] cursor-pointer"
+                        className="min-h-[38px] px-3 py-1 rounded-xl bg-white border-2 border-[#E5E5E5] text-xs sm:text-sm font-bold text-[#666666] hover:text-[#1E1915] cursor-pointer"
                       >
                         리셋
                       </button>
                       <button
                         type="button"
                         onClick={() => handleSafeRestartMission(2)}
-                        title="기존 XP, 별, 배지 기록은 그대로 두고 보기 선택만 새로 시작합니다"
-                        className="min-h-[40px] px-4 py-1.5 rounded-xl border-2 bg-[#DDF4FF] border-[#84D8FF] text-sm font-extrabold text-[#143752] inline-flex items-center gap-1.5 cursor-pointer"
+                        title="기존 XP와 별 기록은 유지하고 보기만 다시 고릅니다"
+                        className="min-h-[38px] px-3.5 py-1 rounded-xl border-2 bg-[#DDF4FF] border-[#84D8FF] text-xs sm:text-sm font-extrabold text-[#143752] inline-flex items-center gap-1.5 cursor-pointer"
                       >
-                        <RotateCcw className="w-4 h-4" />
-                        <span>기록 유지 · 다시 풀기</span>
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>다시 풀기</span>
                       </button>
                     </div>
                   </div>
 
                   {/* Mascot + Speech Bubble Question Prompt */}
                   {renderFoxPromptBubble(
-                    question.setRangeLabel || '정답을 선택해 주세요',
+                    question.setRangeLabel || '정답 고르기',
                     question.prompt,
                     question.underlinedTargets,
                   )}
@@ -1866,13 +2114,6 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                   )}
 
                   {/* Duolingo Tactile Choice Bars ①–⑤ */}
-                  <p
-                    className={`text-xs sm:text-sm font-bold px-1 ${
-                      isLavender ? 'text-[#49467A]' : 'text-[#5C4D42]'
-                    }`}
-                  >
-                    지문과 원본 시험지를 보고 ①~⑤ 중 정답 번호를 고른 뒤 아래 버튼을 눌러 확인하세요.
-                  </p>
                   <div className="space-y-3">
                     {question.choices.map((choice, idx) => {
                       const choiceNum = idx + 1;
@@ -1904,9 +2145,9 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                               setBossFeedback(null);
                             }
                           }}
-                          className={`w-full text-left px-5 py-4 rounded-2xl border-2 transition-all flex items-start justify-between gap-3.5 cursor-pointer min-h-[64px] ${style}`}
+                          className={`rq-hover-lift w-full min-w-0 text-left px-4 sm:px-5 py-4 rounded-2xl border-2 transition-all flex items-start justify-between gap-3 cursor-pointer min-h-[64px] ${style}`}
                         >
-                          <div className="flex items-start gap-3.5">
+                          <div className="flex items-start gap-3 flex-1 min-w-0">
                             <span
                               className={`w-8 h-8 rounded-xl border-2 flex items-center justify-center font-mono text-sm font-extrabold shrink-0 mt-0.5 ${
                                 isSelected
@@ -1924,7 +2165,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                             >
                               {choiceNum}
                             </span>
-                            <span className="text-base sm:text-lg leading-relaxed font-semibold">
+                            <span className="flex-1 min-w-0 text-base sm:text-lg leading-relaxed font-semibold break-words [overflow-wrap:anywhere]">
                               {choice}
                             </span>
                           </div>
@@ -1959,7 +2200,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                   >
                     <div className="flex items-center gap-3.5">
                       <div
-                        className={`w-16 h-16 rounded-2xl overflow-hidden border-2 bg-white flex items-center justify-center shrink-0 shadow-xs ${
+                        className={`rq-float-gentle w-16 h-16 rounded-2xl overflow-hidden border-2 bg-white flex items-center justify-center shrink-0 shadow-xs ${
                           isLavender ? 'border-[#8D7AD6]' : 'border-[#58CC02]'
                         }`}
                       >
@@ -2186,30 +2427,30 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                         <button
                           type="button"
                           onClick={() => handleSafeRestartMission(2)}
-                          className="dq-btn-3d min-h-[50px] px-4 py-2.5 rounded-2xl bg-white border-2 border-[#84D8FF] text-sm sm:text-base font-extrabold text-[#143752] inline-flex items-center gap-1.5 cursor-pointer"
+                          className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl bg-white border-2 border-[#84D8FF] text-sm sm:text-base font-extrabold text-[#143752] inline-flex items-center gap-1.5 cursor-pointer"
                         >
                           <RotateCcw className="w-4 h-4" />
-                          <span>다시 풀어보기</span>
+                          <span>다시 풀기</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => handleGuardedStageChange(3)}
-                          className="dq-btn-3d min-h-[50px] px-5 py-2.5 rounded-2xl bg-white border-2 border-[#A5ED6E] text-sm sm:text-base font-extrabold text-[#285E00] cursor-pointer"
+                          className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl bg-white border-2 border-[#A5ED6E] text-sm sm:text-base font-extrabold text-[#285E00] cursor-pointer"
                         >
-                          해설 · 오답 메모
+                          해설
                         </button>
                         {hasNextMission ? (
                           <button
                             type="button"
                             onClick={onGoNextMission}
-                            className={`dq-btn-3d min-h-[52px] px-7 py-2.5 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-white text-base font-extrabold inline-flex items-center gap-2 cursor-pointer ${
+                            className={`dq-btn-3d min-h-[52px] px-6 py-2.5 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-white text-base font-extrabold inline-flex items-center gap-2 cursor-pointer ${
                               !reducedMotion ? 'rq-unlock-pulse' : ''
                             }`}
                           >
                             <span>
                               {nextMissionLabel
                                 ? `다음 문제 (${nextMissionLabel})`
-                                : '다음 문제 바로 풀기'}
+                                : '다음 문제'}
                             </span>
                             <ArrowRight className="w-5 h-5" />
                           </button>
@@ -2217,9 +2458,9 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                           <button
                             type="button"
                             onClick={() => handleGuardedStageChange(3)}
-                            className="dq-btn-3d min-h-[52px] px-7 py-2.5 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-white text-base font-extrabold inline-flex items-center gap-2 cursor-pointer"
+                            className="dq-btn-3d min-h-[52px] px-6 py-2.5 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-white text-base font-extrabold inline-flex items-center gap-2 cursor-pointer"
                           >
-                            <span>최종 결과 보기</span>
+                            <span>결과 보기</span>
                             <ArrowRight className="w-5 h-5" />
                           </button>
                         )}
@@ -2229,10 +2470,10 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                         <button
                           type="button"
                           onClick={() => setBeginnerHintOpen(true)}
-                          className="dq-btn-3d min-h-[48px] px-4 py-2.5 rounded-2xl bg-[#FFF8E0] border-2 border-[#D4A72C] text-[#6B4A00] text-sm sm:text-base font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
+                          className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl bg-[#FFF8E0] border-2 border-[#D4A72C] text-[#6B4A00] text-sm sm:text-base font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
                         >
                           <BookOpen className="w-4 h-4" />
-                          <span>쉬운 힌트 바로 보기</span>
+                          <span>힌트</span>
                         </button>
                         <button
                           type="button"
@@ -2240,9 +2481,9 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                             setBossFeedback(null);
                             setSelectedBossChoice(null);
                           }}
-                          className="dq-btn-3d min-h-[48px] px-5 py-2.5 rounded-2xl bg-white border-2 border-[#FF9C9E] text-[#9A1B1B] text-sm sm:text-base font-extrabold cursor-pointer"
+                          className="dq-btn-3d min-h-[48px] px-5 py-2 rounded-2xl bg-white border-2 border-[#FF9C9E] text-[#9A1B1B] text-sm sm:text-base font-extrabold cursor-pointer"
                         >
-                          다른 번호 고르기
+                          다시 고르기
                         </button>
                       </>
                     )}
@@ -2251,37 +2492,37 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
               </div>
             ) : stage === 3 ? (
               <div className="sticky bottom-2 z-20 rounded-b-3xl shadow-[0_-8px_22px_rgba(30,25,21,0.08)] border-t-2 border-[#E5E5E5] bg-[#FAFAFA] px-5 sm:px-7 py-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2.5">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={onBackToMap}
-                    className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl bg-white border-2 border-[#E5E5E5] text-sm sm:text-base font-extrabold text-[#4B4B4B] cursor-pointer"
+                    className="dq-btn-3d min-h-[46px] px-4 py-2 rounded-2xl bg-white border-2 border-[#E5E5E5] text-sm sm:text-base font-extrabold text-[#4B4B4B] cursor-pointer"
                   >
-                    전체 문제로
+                    목록
                   </button>
                   <button
                     type="button"
                     onClick={() => handleGuardedStageChange(2)}
-                    className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl bg-white border-2 border-[#E5E5E5] text-sm sm:text-base font-bold text-[#4B4B4B] inline-flex items-center gap-1.5 cursor-pointer"
+                    className="dq-btn-3d min-h-[46px] px-4 py-2 rounded-2xl bg-white border-2 border-[#E5E5E5] text-sm sm:text-base font-bold text-[#4B4B4B] inline-flex items-center gap-1.5 cursor-pointer"
                   >
                     <ArrowLeft className="w-4 h-4" />
-                    <span>문제 다시 보기</span>
+                    <span>문제</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => handleSafeRestartMission(0)}
-                    className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl bg-white border-2 border-[#84D8FF] text-sm sm:text-base font-extrabold text-[#143752] inline-flex items-center gap-1.5 cursor-pointer"
+                    className="dq-btn-3d min-h-[46px] px-4 py-2 rounded-2xl bg-white border-2 border-[#84D8FF] text-sm sm:text-base font-extrabold text-[#143752] inline-flex items-center gap-1.5 cursor-pointer"
                   >
                     <RotateCcw className="w-4 h-4" />
-                    <span>이 문제 다시 풀기</span>
+                    <span>다시 풀기</span>
                   </button>
                   {onOpenReview && hasNextMission && (
                     <button
                       type="button"
                       onClick={onOpenReview}
-                      className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl bg-[#FFF6DA] border-2 border-[#FFC800] text-sm sm:text-base font-extrabold text-[#6B4A00] cursor-pointer"
+                      className="dq-btn-3d min-h-[46px] px-4 py-2 rounded-2xl bg-[#FFF6DA] border-2 border-[#FFC800] text-sm sm:text-base font-extrabold text-[#6B4A00] cursor-pointer"
                     >
-                      오답 · 복습 보기
+                      복습
                     </button>
                   )}
                 </div>
@@ -2290,14 +2531,14 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                   <button
                     type="button"
                     onClick={onGoNextMission}
-                    className={`dq-btn-3d min-h-[52px] px-7 py-2.5 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-white text-base font-extrabold inline-flex items-center gap-2 cursor-pointer ${
+                    className={`dq-btn-3d min-h-[52px] px-6 py-2.5 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-white text-base font-extrabold inline-flex items-center gap-2 cursor-pointer ${
                       !reducedMotion ? 'rq-unlock-pulse' : ''
                     }`}
                   >
                     <span>
                       {nextMissionLabel
                         ? `다음 문제 (${nextMissionLabel})`
-                        : '다음 문제 풀기'}
+                        : '다음 문제'}
                     </span>
                     <ArrowRight className="w-5 h-5" />
                   </button>
@@ -2306,9 +2547,9 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                     <button
                       type="button"
                       onClick={onOpenReview}
-                      className="dq-btn-3d min-h-[52px] px-7 py-2.5 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-white text-base font-extrabold inline-flex items-center gap-2 cursor-pointer"
+                      className="dq-btn-3d min-h-[52px] px-6 py-2.5 rounded-2xl bg-[#58CC02] border-2 border-[#46A302] text-white text-base font-extrabold inline-flex items-center gap-2 cursor-pointer"
                     >
-                      <span>오답 · 복습 보러 가기</span>
+                      <span>복습 보기</span>
                       <ArrowRight className="w-5 h-5" />
                     </button>
                   )
@@ -2317,41 +2558,17 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
             ) : (
               /* Sticky Zero-Scroll Bottom Action Bar for Stage 0, Stage 1 Sub-Pages, and Stage 2 Pre-Submit */
               <div
-                className={`sticky bottom-2 z-20 rounded-b-3xl shadow-[0_-8px_22px_rgba(30,25,21,0.08)] border-t-2 px-5 sm:px-7 py-4 space-y-2.5 ${
+                className={`sticky bottom-2 z-20 rounded-b-3xl shadow-[0_-8px_22px_rgba(30,25,21,0.08)] border-t-2 px-5 sm:px-7 py-3.5 space-y-2 ${
                   (stage === 0 && isStage0Done) || (stage === 1 && isStage1Done)
                     ? 'bg-[#D7FFB8] border-[#A5ED6E]'
                     : 'bg-[#FAFAFA] border-[#E5E5E5]'
                 }`}
               >
-                {stage === 0 && !isStage0Done && (
-                  <div className="rounded-xl border border-[#EAE0D0] bg-white px-3.5 py-2 text-xs sm:text-sm font-bold text-[#5C4D42] flex items-center gap-2">
-                    <Lightbulb className="w-4 h-4 shrink-0 text-[#D4A72C]" />
-                    <span>
-                      단서 카드({progress.discoveredClues.length}/{clueCards.length})를 열거나, 원하면 바로 다음 페이지로 넘어갈 수 있어요.
-                    </span>
-                  </div>
-                )}
-
-                {stage === 1 && !isStage1Done && (
-                  <div className="rounded-xl border border-[#EAE0D0] bg-white px-3.5 py-2 text-xs sm:text-sm font-bold text-[#5C4D42] flex items-center gap-2">
-                    <Lightbulb className="w-4 h-4 shrink-0 text-[#1CB0F6]" />
-                    <span>
-                      {activePageKey === 'flow'
-                        ? '흐름 연습을 마치거나 바로 다음 페이지로 넘겨 정답을 고를 수 있어요.'
-                        : '의미 단위 해석을 완료하거나 바로 정답 고르기로 넘어갈 수 있어요.'}
-                    </span>
-                  </div>
-                )}
-
                 {((stage === 0 && isStage0Done) || (stage === 1 && isStage1Done)) && (
-                  <div className="flex items-center gap-2 text-sm sm:text-base font-extrabold text-[#285E00]">
-                    <CheckCircle2 className="w-5 h-5 text-[#46A302]" />
+                  <div className="flex items-center gap-2 text-sm font-extrabold text-[#285E00]">
+                    <CheckCircle2 className="w-4 h-4 text-[#46A302]" />
                     <span>
-                      {stage === 0
-                        ? '단서를 모두 모았어요! 다음 페이지로 넘겨볼까요?'
-                        : activePageKey === 'flow' && currentSentenceAnalysis
-                          ? '글 흐름 완료! 의미 단위 해석 페이지로 넘기거나 바로 정답 고르기로 갈 수 있어요.'
-                          : '2단계 학습 완료! 다음 페이지(정답 고르기)로 넘겨볼까요?'}
+                      {stage === 0 ? '단서 완료!' : '연습 완료!'}
                     </span>
                   </div>
                 )}
@@ -2362,20 +2579,20 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                       type="button"
                       disabled={!prevPage}
                       onClick={() => goToPageByIndex(activePageIdx - 1)}
-                      className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl border-2 bg-white border-[#E5E5E5] text-sm sm:text-base font-extrabold text-[#4B4B4B] disabled:opacity-40 disabled:pointer-events-none cursor-pointer inline-flex items-center gap-1.5"
+                      className="dq-btn-3d min-h-[46px] px-4 py-2 rounded-2xl border-2 bg-white border-[#E5E5E5] text-sm sm:text-base font-extrabold text-[#4B4B4B] disabled:opacity-40 disabled:pointer-events-none cursor-pointer inline-flex items-center gap-1.5"
                     >
                       <ArrowLeft className="w-4 h-4" />
-                      <span>이전 페이지</span>
+                      <span>이전</span>
                     </button>
 
                     {stage === 2 && (
                       <button
                         type="button"
                         onClick={() => setBeginnerHintOpen(true)}
-                        className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl border-2 border-[#D4A72C] bg-[#FFF8E0] text-sm sm:text-base font-extrabold text-[#6B4A00] inline-flex items-center gap-1.5 cursor-pointer"
+                        className="dq-btn-3d min-h-[46px] px-4 py-2 rounded-2xl border-2 border-[#D4A72C] bg-[#FFF8E0] text-sm sm:text-base font-extrabold text-[#6B4A00] inline-flex items-center gap-1.5 cursor-pointer"
                       >
                         <BookOpen className="w-4 h-4" />
-                        <span>쉬운 힌트</span>
+                        <span>힌트</span>
                       </button>
                     )}
 
@@ -2383,9 +2600,9 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                       <button
                         type="button"
                         onClick={() => handleGuardedStageChange(2)}
-                        className="dq-btn-3d min-h-[48px] px-4 py-2 rounded-2xl border-2 bg-white border-[#58CC02] text-sm font-extrabold text-[#285E00] inline-flex items-center gap-1 cursor-pointer"
+                        className="dq-btn-3d min-h-[46px] px-4 py-2 rounded-2xl border-2 bg-white border-[#58CC02] text-sm font-extrabold text-[#285E00] inline-flex items-center gap-1 cursor-pointer"
                       >
-                        <span>바로 정답 고르기 ▶</span>
+                        <span>바로 풀기 ▶</span>
                       </button>
                     )}
                   </div>
@@ -2395,24 +2612,24 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                       type="button"
                       disabled={selectedBossChoice === null}
                       onClick={handleBossSubmit}
-                      className="dq-btn-3d ml-auto min-h-[52px] px-7 py-2.5 rounded-2xl font-extrabold text-base sm:text-lg bg-[#58CC02] border-2 border-[#46A302] text-white disabled:bg-[#E5E5E5] disabled:border-[#D4D4D4] disabled:text-[#999999] disabled:cursor-not-allowed cursor-pointer"
+                      className="dq-btn-3d ml-auto min-h-[50px] px-6 py-2 rounded-2xl font-extrabold text-base sm:text-lg bg-[#58CC02] border-2 border-[#46A302] text-white disabled:bg-[#E5E5E5] disabled:border-[#D4D4D4] disabled:text-[#999999] disabled:cursor-not-allowed cursor-pointer"
                     >
                       {selectedBossChoice === null
-                        ? '보기를 먼저 눌러주세요 (1~5 키)'
-                        : `${selectedBossChoice}번으로 정답 확인하기`}
+                        ? '번호 선택'
+                        : `${selectedBossChoice}번 정답 확인`}
                     </button>
                   ) : (
                     nextPage && (
                       <button
                         type="button"
                         onClick={() => goToPageByIndex(activePageIdx + 1)}
-                        className={`dq-btn-3d ml-auto min-h-[52px] px-6 py-2.5 rounded-2xl text-base font-extrabold inline-flex items-center gap-2 bg-[#58CC02] border-2 border-[#46A302] text-white cursor-pointer ${
+                        className={`dq-btn-3d ml-auto min-h-[50px] px-6 py-2 rounded-2xl text-base font-extrabold inline-flex items-center gap-2 bg-[#58CC02] border-2 border-[#46A302] text-white cursor-pointer ${
                           !reducedMotion && isNextPageUnlocked && ((stage === 0 && isStage0Done) || (stage === 1 && isStage1Done))
                             ? 'rq-unlock-pulse'
                             : ''
                         }`}
                       >
-                        <span>다음 페이지 ({nextPage.titleKo})</span>
+                        <span>다음 ({nextPage.titleKo})</span>
                         <ArrowRight className="w-5 h-5" />
                       </button>
                     )
@@ -2422,17 +2639,90 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
             )}
         </section>
 
-        <aside
-          className={`${
-            showSplitPane
-              ? 'lg:col-span-12 grid grid-cols-1 md:grid-cols-2 gap-4'
-              : 'lg:col-span-4 space-y-4'
-          }`}
-        >
+        {!showSplitPane && (
+          <aside className="lg:col-span-4 space-y-4 min-w-0">
+            <MascotWidget
+              mood={mascotMood}
+              nickname={nickname}
+              compact={false}
+              currentStreak={currentStreak}
+              islandTheme={islandTheme}
+              level={level}
+              equippedGearId={equippedGearId}
+            />
+
+            <div
+              className={`rounded-2xl border-2 bg-white p-5 space-y-3 shadow-xs ${
+                isLavender ? 'border-[#C6BEE8] !bg-[#FAF9FF]' : 'border-[#E5E5E5]'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div
+                  className={`flex items-center gap-2 text-sm sm:text-base font-extrabold ${
+                    isLavender ? 'text-[#5E4AA3]' : 'text-[#8A6142]'
+                  }`}
+                >
+                  <Lightbulb className="w-5 h-5" />
+                  <span>단계별 핵심 힌트</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`text-xs sm:text-sm font-mono font-bold tabular-nums ${
+                      isLavender ? 'text-[#49467A]' : 'text-[#5C4D42]'
+                    }`}
+                  >
+                    단서 {progress.discoveredClues.length}/{clueCards.length}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowHint((prev) => !prev)}
+                    className={`min-h-[40px] px-4 py-1.5 rounded-xl border-2 text-sm font-extrabold cursor-pointer ${
+                      isLavender
+                        ? 'bg-[#F3F1FC] border-[#C9C2E8] text-[#14132E] hover:border-[#6A52A3]'
+                        : 'bg-[#FAFAFA] border-[#E5E5E5] text-[#1E1915] hover:border-[#1CB0F6]'
+                    }`}
+                  >
+                    {showHint ? '접기' : '포인트 보기'}
+                  </button>
+                </div>
+              </div>
+              <p
+                className={`text-sm leading-relaxed font-medium break-words [overflow-wrap:anywhere] ${
+                  isLavender ? 'text-[#3B386B]' : 'text-[#4B4B4B]'
+                }`}
+              >
+                {stageInfo.detectiveTip}
+              </p>
+              {showHint && (
+                <div
+                  className={`rounded-xl border-2 p-3.5 text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${
+                    isLavender
+                      ? 'bg-[#E8F1FD] border-[#7AAEE3] text-[#162C5E]'
+                      : 'bg-[#FFF8DF] border-[#E0B94B] text-[#1E1915]'
+                  }`}
+                >
+                  <span className="font-extrabold inline-flex items-center gap-1.5 mr-1.5">
+                    <HelpCircle
+                      className={`w-4 h-4 ${
+                        isLavender ? 'text-[#3B6FB6]' : 'text-[#8A6142]'
+                      }`}
+                    />
+                    핵심 포인트:
+                  </span>
+                  {question.keyFocus}
+                </div>
+              )}
+            </div>
+          </aside>
+        )}
+      </div>
+
+      {showSplitPane && (
+        <aside className="grid grid-cols-1 md:grid-cols-2 gap-4 min-w-0">
           <MascotWidget
             mood={mascotMood}
             nickname={nickname}
-            compact={showSplitPane}
+            compact
             currentStreak={currentStreak}
             islandTheme={islandTheme}
             level={level}
@@ -2440,7 +2730,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
           />
 
           <div
-            className={`rounded-2xl border-2 bg-white p-5 space-y-3 shadow-xs ${
+            className={`rounded-2xl border-2 bg-white p-5 space-y-3 shadow-xs min-w-0 ${
               isLavender ? 'border-[#C6BEE8] !bg-[#FAF9FF]' : 'border-[#E5E5E5]'
             }`}
           >
@@ -2475,7 +2765,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
               </div>
             </div>
             <p
-              className={`text-sm leading-relaxed font-medium ${
+              className={`text-sm leading-relaxed font-medium break-words [overflow-wrap:anywhere] ${
                 isLavender ? 'text-[#3B386B]' : 'text-[#4B4B4B]'
               }`}
             >
@@ -2483,7 +2773,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
             </p>
             {showHint && (
               <div
-                className={`rounded-xl border-2 p-3.5 text-sm leading-relaxed ${
+                className={`rounded-xl border-2 p-3.5 text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${
                   isLavender
                     ? 'bg-[#E8F1FD] border-[#7AAEE3] text-[#162C5E]'
                     : 'bg-[#FFF8DF] border-[#E0B94B] text-[#1E1915]'
@@ -2502,7 +2792,7 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
             )}
           </div>
         </aside>
-      </div>
+      )}
 
       {/* Fullscreen Original PNG Modal */}
       {pngModalOpen && (
@@ -2521,13 +2811,34 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="flex-1 min-h-0 p-3">
-              <PngViewer
-                pages={question.pages}
-                targetExamLabel={`${question.sourceExam} (${formatItemNumber(question.originalItemNumber)})`}
-                targetQuestionId={question.id}
-                islandTheme={islandTheme}
-              />
+            <div className="flex-1 min-h-0 p-3 flex flex-col gap-3">
+              {bboxDebugOpen && (
+                <BboxDebugPanel
+                  question={question}
+                  activePage={activePngPage}
+                  imageDims={imageDims}
+                  offset={activeBboxOffset}
+                  savedCount={Object.keys(debugDeltaByKey).length}
+                  onChangeOffset={handleChangeBboxOffset}
+                  onResetOffset={handleResetBboxOffset}
+                  onResetAllOffsets={handleResetAllBboxOffsets}
+                  onClose={() => setBboxDebugOpen(false)}
+                />
+              )}
+              <div className="flex-1 min-h-0">
+                <PngViewer
+                  pages={question.pages}
+                  targetExamLabel={`${question.sourceExam} (${formatItemNumber(question.originalItemNumber)})`}
+                  targetQuestionId={question.id}
+                  islandTheme={islandTheme}
+                  bboxDebug={bboxDebugOpen}
+                  bboxOffset={bboxDebugOpen ? activeBboxOffset : undefined}
+                  offsetsByKey={debugDeltaByKey}
+                  onActivePageChange={setActivePngPage}
+                  onImageDimensionsChange={setImageDims}
+                  onSelectDebugQuestion={onSelectQuestion}
+                />
+              </div>
             </div>
           </div>
         </div>

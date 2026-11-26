@@ -451,6 +451,34 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
             isLavender ? '!bg-[#FAF9FF] !border-[#C6BEE8]' : ''
           }`}
         >
+          {/* Compact Gamified Player Status Bar */}
+          <div
+            className={`rounded-2xl border px-3.5 py-2 flex flex-wrap items-center justify-between gap-2 text-xs font-extrabold tabular-nums ${
+              isLavender
+                ? 'bg-[#F3F1FC] border-[#D3CCEE] text-[#211442]'
+                : 'bg-[#FFFDF6] border-[#EAE0D0] text-[#2D2620]'
+            }`}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className={`px-2 py-0.5 rounded-lg font-mono text-[11px] font-extrabold text-white ${
+                  isLavender ? 'bg-[#7963A8]' : 'bg-[#58CC02]'
+                }`}
+              >
+                LV.{level}
+              </span>
+              <span className="truncate">{nickname} 탐험가</span>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <span className={isLavender ? 'text-[#4C497A]' : 'text-[#6E5E52]'}>
+                전체 {islandStats['2025'].completed + islandStats['2026'].completed}/{questions.length}
+              </span>
+              <span className="text-[#B47A00]">
+                ★ {islandStats['2025'].totalStars + islandStats['2026'].totalStars}
+              </span>
+            </div>
+          </div>
+
           <MascotWidget
             mood={
               currentHeroMission && nodeStatusMap[currentHeroMission.id] === 'completed'
@@ -512,7 +540,7 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
                   }`}
                 >
                   <Compass className="w-4 h-4" />
-                  <span>{hasStartedOnIsland ? '바로 풀기' : '첫 문제 시작'}</span>
+                  <span>{hasStartedOnIsland ? '바로 풀기' : '시작하기'}</span>
                 </button>
               </div>
             );
@@ -524,10 +552,10 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
           <button
             type="button"
             onClick={() => handleSelectIsland('2025')}
-            className={`text-left rounded-3xl overflow-hidden transition-all cursor-pointer flex flex-col ${
+            className={`group rq-hover-lift text-left rounded-3xl overflow-hidden transition-all cursor-pointer flex flex-col ${
               selectedIsland === '2025'
                 ? 'clay-card ring-4 ring-[#9BCB83]/60 border-[#5D8A43]'
-                : 'clay-card-soft opacity-90 hover:opacity-100'
+                : 'clay-card-soft opacity-95 hover:opacity-100'
             }`}
           >
             <div className="relative h-32 sm:h-36 w-full bg-[#A9DDF5] overflow-hidden">
@@ -540,14 +568,14 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
                   src={springIslandImg}
                   alt="제1탐험섬 2025 봄빛 초원 섬"
                   onError={() => setSpringImgError(true)}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
                 />
               )}
               <div className="absolute top-3 left-3 bg-[#FFF9EF]/95 border border-[#EAE0D0] px-2.5 py-1 rounded-lg text-xs font-bold text-[#2D2620] shadow-xs">
                 제1시험지 · 2025
               </div>
               {selectedIsland === '2025' && (
-                <div className="absolute top-3 right-3 bg-[#9BCB83] border border-[#5D8A43]/30 px-2.5 py-1 rounded-lg text-xs font-bold text-[#1F3514] flex items-center gap-1 shadow-xs">
+                <div className="rq-float-gentle absolute top-3 right-3 bg-[#9BCB83] border border-[#5D8A43]/30 px-2.5 py-1 rounded-lg text-xs font-bold text-[#1F3514] flex items-center gap-1 shadow-xs">
                   <Flag className="w-3 h-3" />
                   <span>선택됨</span>
                 </div>
@@ -576,6 +604,12 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
                     style={{ width: `${islandStats['2025'].pct}%` }}
                   >
                     <div className="h-1 bg-white/35 rounded-full mx-1 mt-0.5" />
+                    {islandStats['2025'].pct > 0 && (
+                      <div
+                        aria-hidden="true"
+                        className="rq-progress-glint absolute inset-y-0 w-12 bg-gradient-to-r from-transparent via-white/40 to-transparent"
+                      />
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center justify-between text-xs font-bold text-[#7D6E61] pt-0.5 tabular-nums">
@@ -599,10 +633,10 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
           <button
             type="button"
             onClick={() => handleSelectIsland('2026')}
-            className={`text-left rounded-3xl overflow-hidden transition-all cursor-pointer flex flex-col ${
+            className={`group rq-hover-lift text-left rounded-3xl overflow-hidden transition-all cursor-pointer flex flex-col ${
               selectedIsland === '2026'
                 ? 'clay-card ring-4 ring-[#8E7AD6]/75 !border-[#6A52A3]'
-                : 'clay-card-soft opacity-90 hover:opacity-100'
+                : 'clay-card-soft opacity-95 hover:opacity-100'
             }`}
           >
             <div className="relative h-32 sm:h-36 w-full bg-[#A9DDF5] overflow-hidden">
@@ -615,14 +649,14 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
                   src={lakeIslandImg}
                   alt="제2시험지 2026 라벤더 호수 테마"
                   onError={() => setLakeImgError(true)}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105"
                 />
               )}
               <div className="absolute top-3 left-3 bg-[#F4F2FC]/95 border border-[#C9B9E8] px-2.5 py-1 rounded-lg text-xs font-bold text-[#211442] shadow-xs">
                 제2시험지 · 2026
               </div>
               {selectedIsland === '2026' && (
-                <div className="absolute top-3 right-3 bg-[#C9B9E8] border border-[#6A52A3]/40 px-2.5 py-1 rounded-lg text-xs font-bold text-[#211442] flex items-center gap-1 shadow-xs">
+                <div className="rq-float-gentle absolute top-3 right-3 bg-[#C9B9E8] border border-[#6A52A3]/40 px-2.5 py-1 rounded-lg text-xs font-bold text-[#211442] flex items-center gap-1 shadow-xs">
                   <Flag className="w-3 h-3" />
                   <span>선택됨</span>
                 </div>
@@ -651,6 +685,12 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
                     style={{ width: `${islandStats['2026'].pct}%` }}
                   >
                     <div className="h-1 bg-white/35 rounded-full mx-1 mt-0.5" />
+                    {islandStats['2026'].pct > 0 && (
+                      <div
+                        aria-hidden="true"
+                        className="rq-progress-glint absolute inset-y-0 w-12 bg-gradient-to-r from-transparent via-white/40 to-transparent"
+                      />
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center justify-between text-xs font-bold text-[#636094] pt-0.5 tabular-nums">
@@ -702,7 +742,7 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
                 }`}
               >
                 <Zap className="w-4 h-4 text-[#FF9600]" />
-                <span>1분 스피드 어휘 퀴즈</span>
+                <span>어휘 퀴즈</span>
               </button>
             )}
           </div>
@@ -791,7 +831,7 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
                   : 'bg-[#FFF9EF] border-[#EAE0D0] text-[#5C4D42] hover:border-[#9B785D]'
             }`}
           >
-            3점 고난도만 보기
+            3점만
           </button>
 
           <button
@@ -803,7 +843,7 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
                 : 'border-[#EAE0D0] text-[#2D2620] hover:border-[#1CB0F6]'
             }`}
           >
-            내 현재 문제로
+            내 위치
           </button>
         </div>
 
@@ -817,7 +857,7 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
                 : 'border-[#EAE0D0] bg-[#FFF9EF] text-[#5C4D42] hover:text-[#2D2620]'
             }`}
           >
-            {allCollapsed ? '모든 유형 펼치기' : '모든 유형 접기'}
+            {allCollapsed ? '모두 펼치기' : '모두 접기'}
           </button>
 
           <button
@@ -836,12 +876,12 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
             {freeExploreMode ? (
               <>
                 <Unlock className="w-3.5 h-3.5" />
-                <span>자유 선택 중</span>
+                <span>자유 선택</span>
               </>
             ) : (
               <>
                 <Lock className="w-3.5 h-3.5" />
-                <span>순서대로 풀기</span>
+                <span>순서 풀기</span>
               </>
             )}
           </button>
@@ -1097,8 +1137,8 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
                         <Crown className="w-3.5 h-3.5" />
                         <span>
                           {bossCleared
-                            ? '미니테스트 완료 👑 · 재도전'
-                            : `이 유형 ${zone.bossCount}문제 미니테스트 (${bossMins}분)`}
+                            ? '미니테스트 완료 👑'
+                            : `미니테스트 · ${zone.bossCount}문제 (${bossMins}분)`}
                         </span>
                       </button>
 
@@ -1399,7 +1439,7 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
                               {(isActive || (isHero && !isCompleted)) && (
                                 <span
                                   aria-hidden="true"
-                                  className={`absolute -top-2 -right-2 w-6 h-6 rounded-full border-2 border-white flex items-center justify-center shadow-xs ${
+                                  className={`rq-float-gentle absolute -top-2 -right-2 w-6 h-6 rounded-full border-2 border-white flex items-center justify-center shadow-xs ${
                                     isLavender ? 'bg-[#4A76C2]' : 'bg-[#F39A83]'
                                   }`}
                                 >
@@ -1505,10 +1545,10 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
                                     {isActive
                                       ? '풀던 중'
                                       : isHero
-                                        ? '다음 추천'
+                                        ? '추천'
                                         : isLocked
                                           ? '잠김'
-                                          : '풀어보기'}
+                                          : '풀기'}
                                   </span>
                                 )}
                               </div>

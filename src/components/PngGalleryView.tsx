@@ -32,9 +32,23 @@ export const PngGalleryView: React.FC<PngGalleryViewProps> = ({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
         {PAGE_ASSETS.map((pageAsset) => {
-          const pageQuestions = questions.filter((q) =>
-            q.pages.includes(pageAsset.page),
-          );
+          const getPageRect = (q: ExtractedQuestion) => {
+            const c = q.coordinates?.find((item) => item.page === pageAsset.page);
+            if (c) return c.focus ?? c;
+            if (q.pages[0] === pageAsset.page && q.bbox) {
+              return { x: q.bbox[0], y: q.bbox[1], w: q.bbox[2], h: q.bbox[3] };
+            }
+            return null;
+          };
+
+          const pageQuestions = questions
+            .filter((q) => q.pages.includes(pageAsset.page))
+            .slice()
+            .sort((a, b) => {
+              const ra = getPageRect(a);
+              const rb = getPageRect(b);
+              return (ra?.y ?? 0) - (rb?.y ?? 0);
+            });
           const hasError = failedPages[pageAsset.page];
 
           return (
@@ -60,19 +74,45 @@ export const PngGalleryView: React.FC<PngGalleryViewProps> = ({
                     </span>
                   </div>
                 ) : (
-                  <img
-                    src={pageAsset.url}
-                    alt={`중학 영어 복습 독해편 ${pageAsset.page}페이지`}
-                    referrerPolicy="no-referrer"
-                    loading="lazy"
-                    onError={() =>
-                      setFailedPages((prev) => ({
-                        ...prev,
-                        [pageAsset.page]: true,
-                      }))
-                    }
-                    className="w-full h-full object-contain bg-white border border-[#EAE0D0] rounded-lg"
-                  />
+                  <div className="relative h-full aspect-[2481/3508] max-w-full bg-white border border-[#EAE0D0] rounded-lg overflow-hidden">
+                    <img
+                      src={pageAsset.url}
+                      alt={`중학 영어 복습 독해편 ${pageAsset.page}페이지`}
+                      referrerPolicy="no-referrer"
+                      loading="lazy"
+                      onError={() =>
+                        setFailedPages((prev) => ({
+                          ...prev,
+                          [pageAsset.page]: true,
+                        }))
+                      }
+                      className="w-full h-full object-fill block"
+                    />
+                    {pageQuestions.map((q) => {
+                      const rect = getPageRect(q);
+                      if (!rect) return null;
+                      const is2026 = q.examYear === '2026';
+                      return (
+                        <button
+                          key={q.id}
+                          type="button"
+                          onClick={() => onSelectQuestion(q.id)}
+                          title={`${q.sourceExam} · ${q.sectionTitle}`}
+                          style={{
+                            left: `${(rect.x * 100).toFixed(2)}%`,
+                            top: `${(rect.y * 100).toFixed(2)}%`,
+                            width: `${(rect.w * 100).toFixed(2)}%`,
+                            height: `${(rect.h * 100).toFixed(2)}%`,
+                          }}
+                          className={`absolute rounded border transition-colors cursor-pointer ${
+                            is2026
+                              ? 'border-[#6A52A3]/45 hover:border-[#6A52A3] hover:bg-[#7963A8]/15'
+                              : 'border-[#58CC02]/50 hover:border-[#46A302] hover:bg-[#58CC02]/15'
+                          }`}
+                        />
+                      );
+                    })}
+                  </div>
                 )}
               </div>
 

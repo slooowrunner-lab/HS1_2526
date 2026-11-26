@@ -84,48 +84,71 @@
 .clay-card {
   background-color: #FFFFFF;
   border: 1.5px solid #EAE0D0;
-  box-shadow: 0 4px 0 rgba(155, 120, 93, 0.1), 0 8px 20px rgba(155, 120, 93, 0.07);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.9),
+    0 5px 0 rgba(155, 120, 93, 0.13),
+    0 12px 26px rgba(155, 120, 93, 0.09);
 }
 
 .clay-card-soft {
   background-color: #FFFDF8;
   border: 1.5px solid #EAE0D0;
-  box-shadow: 0 3px 0 rgba(155, 120, 93, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 3px 0 rgba(155, 120, 93, 0.1),
+    0 6px 14px rgba(155, 120, 93, 0.05);
 }
 
 .clay-btn {
   border: 1.5px solid rgba(45, 38, 32, 0.14);
-  box-shadow: 0 4px 0 rgba(155, 120, 93, 0.2);
-  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 140ms cubic-bezier(0.16, 1, 0.3, 1),
-    background-color 140ms ease,
-    filter 140ms ease;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.55),
+    0 4px 0 rgba(155, 120, 93, 0.22),
+    0 6px 12px rgba(45, 38, 32, 0.06);
+  transition: transform 150ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 150ms cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 150ms ease,
+    filter 150ms ease;
 }
 
 .clay-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  filter: brightness(1.02);
-  box-shadow: 0 5px 0 rgba(155, 120, 93, 0.24);
+  transform: translateY(-2px);
+  filter: brightness(1.025);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.65),
+    0 6px 0 rgba(155, 120, 93, 0.25),
+    0 10px 18px rgba(45, 38, 32, 0.1);
 }
 
 .clay-btn:active:not(:disabled) {
   transform: translateY(2px);
-  box-shadow: 0 2px 0 rgba(155, 120, 93, 0.18);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 2px 0 rgba(155, 120, 93, 0.2);
 }
 
 .clay-node {
-  box-shadow: 0 5px 0 rgba(155, 120, 93, 0.24), 0 8px 16px rgba(45, 38, 32, 0.08);
-  transition: transform 160ms ease, box-shadow 160ms ease;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.6),
+    0 6px 0 rgba(155, 120, 93, 0.26),
+    0 10px 20px rgba(45, 38, 32, 0.1);
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .clay-node:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 7px 0 rgba(155, 120, 93, 0.28), 0 12px 20px rgba(45, 38, 32, 0.12);
+  transform: translateY(-3px) scale(1.04);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.72),
+    0 9px 0 rgba(155, 120, 93, 0.3),
+    0 14px 24px rgba(45, 38, 32, 0.14);
 }
 
 .clay-node:active:not(:disabled) {
-  transform: translateY(2px);
-  box-shadow: 0 2px 0 rgba(155, 120, 93, 0.22);
+  transform: translateY(2px) scale(0.98);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 2px 0 rgba(155, 120, 93, 0.22);
 }
 
 /* Restraint 0.5s Success Micro-Animations (only triggered upon correct submission) */
@@ -310,6 +333,35 @@
   }
 }
 
+@keyframes rq-float-gentle {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+@keyframes rq-view-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.992);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rq-ambient-drift {
+  0%, 100% {
+    transform: translate3d(0px, 0px, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(18px, -14px, 0) scale(1.06);
+  }
+}
+
 @keyframes rq-unlock-pulse {
   0%, 100% {
     transform: scale(1);
@@ -363,6 +415,44 @@
   animation: rq-fox-bob 3s ease-in-out infinite;
 }
 
+.rq-float-gentle {
+  animation: rq-float-gentle 3.8s ease-in-out infinite;
+  will-change: transform;
+}
+
+.rq-float-delayed {
+  animation: rq-float-gentle 4.2s ease-in-out 1.2s infinite;
+  will-change: transform;
+}
+
+.rq-view-enter {
+  animation: rq-view-enter 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.rq-ambient-orb {
+  animation: rq-ambient-drift 18s ease-in-out infinite;
+  will-change: transform;
+}
+
+.rq-hover-lift {
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.rq-hover-lift:hover:not(:disabled) {
+  transform: translateY(-3px);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.85),
+    0 8px 0 rgba(155, 120, 93, 0.14),
+    0 14px 26px rgba(45, 38, 32, 0.09);
+}
+
+.rq-hover-lift:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
 .rq-unlock-pulse {
   animation: rq-unlock-pulse 1.5s ease-in-out infinite;
 }
@@ -374,20 +464,31 @@
 /* Tactile Duolingo-inspired 3D push buttons, speech bubbles, and progress gloss */
 .dq-btn-3d {
   border-bottom-width: 4px;
-  transition: transform 0.14s cubic-bezier(0.16, 1, 0.3, 1),
-    filter 0.14s ease,
-    border-bottom-width 0.12s ease,
-    background-color 0.14s ease,
-    border-color 0.14s ease;
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.48),
+    0 2px 6px rgba(45, 38, 32, 0.06);
+  transition: transform 150ms cubic-bezier(0.16, 1, 0.3, 1),
+    filter 150ms ease,
+    border-bottom-width 120ms ease,
+    box-shadow 150ms cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 150ms ease,
+    border-color 150ms ease;
 }
 
 .dq-btn-3d:hover:not(:disabled) {
-  filter: brightness(1.025);
+  transform: translateY(-2px);
+  filter: brightness(1.03);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.65),
+    0 6px 14px rgba(45, 38, 32, 0.1);
 }
 
 .dq-btn-3d:active:not(:disabled) {
   transform: translateY(2px);
   border-bottom-width: 2px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 1px 3px rgba(45, 38, 32, 0.05);
 }
 
 button:focus-visible,

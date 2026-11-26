@@ -54,8 +54,8 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
   onCompleteStoryBuild,
   onRecordGuess,
   onGoToBoss,
-  nextStepLabel = '다음: 문제 풀고 답 고르기',
   onSkipToBoss,
+  nextStepLabel = '문제 풀기',
   islandTheme = 'spring',
 }) => {
   const isLavender = islandTheme === 'lavender';
@@ -263,7 +263,7 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
         >
           <span className="inline-flex items-center gap-2">
             <Sparkles className="w-4 h-4 shrink-0" />
-            <span>핵심 주제를 먼저 짚어보고 바로 문제를 풀어보세요!</span>
+            <span>핵심 주제를 먼저 고르세요</span>
           </span>
           {onSkipToBoss && (
             <button
@@ -271,7 +271,7 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
               onClick={onSkipToBoss}
               className="text-xs sm:text-sm font-extrabold underline underline-offset-4 cursor-pointer"
             >
-              건너뛰고 바로 문제 풀기 ▶
+              바로 풀기 ▶
             </button>
           )}
         </div>
@@ -296,7 +296,7 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
               }`}
             >
               <Lightbulb className="w-4 h-4" />
-              <span>{showFlowHint ? '힌트 접기' : '흐름 힌트'}</span>
+              <span>{showFlowHint ? '접기' : '힌트'}</span>
             </button>
             {selectedGuess !== null && (
               <button
@@ -309,7 +309,7 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
                 }`}
               >
                 <RotateCcw className="w-4 h-4" />
-                <span>선택 초기화</span>
+                <span>초기화</span>
               </button>
             )}
           </div>
@@ -360,15 +360,15 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
             return (
               <div
                 key={idx}
-                className={`rounded-2xl border-2 transition-all flex items-start justify-between gap-3 p-4 sm:p-5 ${cardClass}`}
+                className={`rounded-2xl border-2 transition-all flex items-start justify-between gap-2.5 p-3.5 sm:p-4 min-w-0 ${cardClass}`}
               >
                 <button
                   type="button"
                   onClick={() => handleSelectGuessCard(idx)}
-                  className="flex-1 text-left flex items-start gap-3.5 cursor-pointer"
+                  className="flex-1 min-w-0 text-left flex items-start gap-3 cursor-pointer"
                 >
                     <span
-                      className={`w-10 h-10 rounded-xl border-2 flex items-center justify-center font-mono text-base font-extrabold shrink-0 mt-0.5 ${
+                      className={`w-9 h-9 rounded-xl border-2 flex items-center justify-center font-mono text-sm sm:text-base font-extrabold shrink-0 mt-0.5 ${
                         isSelected
                           ? isLavender
                             ? 'bg-[#C9B9E8] border-[#6A52A3] text-[#211442]'
@@ -380,8 +380,8 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
                     >
                       {idx + 1}
                     </span>
-                    <div className="space-y-1.5 flex-1">
-                      <span className="text-lg sm:text-xl font-bold leading-relaxed block">
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      <span className="text-base sm:text-lg font-bold leading-relaxed block break-words [overflow-wrap:anywhere]">
                         {opt.text}
                       </span>
                       <div className="flex flex-wrap items-center gap-2 text-sm sm:text-base font-extrabold">
@@ -434,7 +434,7 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
               className="dq-btn-3d min-h-[54px] px-7 py-3.5 rounded-2xl text-base font-extrabold bg-[#58CC02] border-2 border-[#46A302] text-white disabled:bg-[#E5E5E5] disabled:border-[#D4D4D4] disabled:text-[#999999] disabled:cursor-not-allowed cursor-pointer inline-flex items-center gap-2"
             >
               <Check className="w-5 h-5" />
-              <span>선택한 핵심 내용 확인하기</span>
+              <span>정답 확인</span>
             </button>
           ) : (
             <div className="w-full rounded-2xl bg-[#D7FFB8] border-2 border-[#58CC02] p-5 flex flex-wrap items-center justify-between gap-3">
@@ -475,7 +475,7 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
       >
         <span className="inline-flex items-center gap-2">
           <Sparkles className="w-4 h-4 shrink-0" />
-          <span>글의 흐름 순서를 맞춘 뒤 문제 풀기로 넘어가 보세요!</span>
+          <span>글의 흐름 순서를 맞추세요</span>
         </span>
         {onSkipToBoss && (
           <button
@@ -483,7 +483,7 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
             onClick={onSkipToBoss}
             className="text-xs sm:text-sm font-extrabold underline underline-offset-4 cursor-pointer"
           >
-            건너뛰고 바로 문제 풀기 ▶
+            바로 풀기 ▶
           </button>
         )}
       </div>
@@ -494,7 +494,7 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
             글의 흐름 순서 맞추기 (+15 XP)
           </h2>
           <p className={`text-base sm:text-lg mt-1 leading-relaxed ${isLavender ? 'text-[#3F3D6B]' : 'text-[#5C4D42]'}`}>
-            아래 카드를 누르거나 끌어서 순서대로 채워보세요. X 버튼으로 언제든 빼고 다시 고를 수 있어요.
+            카드를 눌러 순서대로 채워보세요.
           </p>
         </div>
 
@@ -509,7 +509,7 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
             }`}
           >
             <Lightbulb className="w-4 h-4" />
-            <span>{showFlowHint ? '힌트 접기' : '순서 힌트'}</span>
+            <span>{showFlowHint ? '접기' : '힌트'}</span>
           </button>
 
           {previousOrderBackup && (
@@ -523,7 +523,7 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
               }`}
             >
               <RotateCcw className="w-4 h-4" />
-              <span>이전 배치 복구</span>
+              <span>복구</span>
             </button>
           )}
 
@@ -538,7 +538,7 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
               }`}
             >
               <RotateCcw className="w-4 h-4" />
-              <span>다시 연습 (기록 유지)</span>
+              <span>다시 풀기</span>
             </button>
           )}
         </div>
@@ -618,96 +618,98 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
                 e.preventDefault();
                 handleDropIntoSlot(slotPos);
               }}
-              className={`p-4 sm:p-5 rounded-2xl border-2 flex items-start gap-3.5 transition-all ${slotStyle}`}
+              className={`p-3.5 sm:p-4 rounded-2xl border-2 flex flex-col gap-2.5 min-w-0 transition-all ${slotStyle}`}
             >
-              <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
-                {hasCard && !isLockedSolved && (
-                  <GripVertical
-                    className={`w-4 h-4 hidden sm:block cursor-grab ${
-                      isLavender ? 'text-[#6A52A3]/70' : 'text-[#9B785D]/70'
+              <div className="flex items-center justify-between gap-2 min-w-0">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  {hasCard && !isLockedSolved && (
+                    <GripVertical
+                      className={`w-4 h-4 hidden sm:block shrink-0 cursor-grab ${
+                        isLavender ? 'text-[#6A52A3]/70' : 'text-[#9B785D]/70'
+                      }`}
+                      aria-hidden="true"
+                    />
+                  )}
+                  <span
+                    className={`px-2.5 py-0.5 rounded-xl font-mono text-sm sm:text-base font-extrabold tabular-nums shrink-0 ${
+                      isSlotCorrect
+                        ? 'bg-[#4E8336] text-white'
+                        : isSlotWrong
+                          ? 'bg-[#C85B3F] text-white'
+                          : hasCard
+                            ? isLavender
+                              ? 'bg-[#C9B9E8] text-[#211442]'
+                              : 'bg-[#FFE18A] text-[#2D2620]'
+                            : isLavender
+                              ? 'bg-[#E1DEF4] text-[#3F3D6B]'
+                              : 'bg-[#EAE0D0] text-[#5C4D42]'
                     }`}
-                    aria-hidden="true"
-                  />
+                  >
+                    0{slotPos + 1}
+                  </span>
+                  {isSlotCorrect && (
+                    <span className="inline-flex items-center gap-1 text-xs sm:text-sm font-extrabold text-[#2E571C] truncate">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>알맞은 순서</span>
+                    </span>
+                  )}
+                  {isSlotWrong && (
+                    <span className="text-xs sm:text-sm font-extrabold text-[#B4462A] truncate">
+                      순서 다시 확인
+                    </span>
+                  )}
+                </div>
+
+                {hasCard && !isLockedSolved && (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      disabled={slotPos === 0}
+                      onClick={() => handleMoveSlot(slotPos, -1)}
+                      aria-label={`${slotPos + 1}번 카드를 위로 이동`}
+                      className={`w-8 h-8 rounded-lg border-2 disabled:opacity-35 flex items-center justify-center cursor-pointer ${
+                        isLavender
+                          ? 'bg-[#F4F2FC] border-[#C9C2E8] text-[#4A467A] hover:border-[#6A52A3]'
+                          : 'bg-[#FFF9EF] border-[#EAE0D0] text-[#5C4D42] hover:border-[#9B785D]'
+                      }`}
+                    >
+                      <ArrowUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={slotPos === placedOrder.length - 1}
+                      onClick={() => handleMoveSlot(slotPos, 1)}
+                      aria-label={`${slotPos + 1}번 카드를 아래로 이동`}
+                      className={`w-8 h-8 rounded-lg border-2 disabled:opacity-35 flex items-center justify-center cursor-pointer ${
+                        isLavender
+                          ? 'bg-[#F4F2FC] border-[#C9C2E8] text-[#4A467A] hover:border-[#6A52A3]'
+                          : 'bg-[#FFF9EF] border-[#EAE0D0] text-[#5C4D42] hover:border-[#9B785D]'
+                      }`}
+                    >
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveFromSlot(origIdx)}
+                      aria-label={`${slotPos + 1}번 순서 카드 취소`}
+                      title="선택 취소 (X)"
+                      className={`w-8 h-8 rounded-lg bg-white border-2 hover:bg-[#F39A83]/25 hover:border-[#D1684E] hover:text-[#7A2D1C] flex items-center justify-center cursor-pointer ${
+                        isLavender
+                          ? 'border-[#C6BEE8] text-[#4E4A7D]'
+                          : 'border-[#D4C3AE] text-[#5C4D42]'
+                      }`}
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
                 )}
-                <span
-                  className={`px-3 py-1 rounded-xl font-mono text-base font-extrabold tabular-nums ${
-                    isSlotCorrect
-                      ? 'bg-[#4E8336] text-white'
-                      : isSlotWrong
-                        ? 'bg-[#C85B3F] text-white'
-                        : hasCard
-                          ? isLavender
-                            ? 'bg-[#C9B9E8] text-[#211442]'
-                            : 'bg-[#FFE18A] text-[#2D2620]'
-                          : isLavender
-                            ? 'bg-[#E1DEF4] text-[#3F3D6B]'
-                            : 'bg-[#EAE0D0] text-[#5C4D42]'
-                  }`}
-                >
-                  0{slotPos + 1}
-                </span>
               </div>
 
-              <div className="flex-1 min-w-0">
-                <p className="text-lg sm:text-xl font-bold leading-relaxed">
+              <div className="w-full min-w-0">
+                <p className="text-base sm:text-lg font-bold leading-relaxed break-words [overflow-wrap:anywhere]">
                   {cardText ?? '아래 전개 카드를 눌러 순서대로 채우세요'}
                 </p>
-                {isSlotCorrect && (
-                  <span className="mt-1.5 inline-flex items-center gap-1 text-sm sm:text-base font-extrabold text-[#2E571C]">
-                    <CheckCircle2 className="w-4 h-4" />
-                    알맞은 순서입니다
-                  </span>
-                )}
-                {isSlotWrong && (
-                  <span className="mt-1.5 inline-block text-sm sm:text-base font-extrabold text-[#B4462A]">
-                    이 자리가 아닌 것 같아요 (X로 빼거나 위/아래 버튼으로 옮겨보세요)
-                  </span>
-                )}
               </div>
-
-              {hasCard && !isLockedSolved && (
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    disabled={slotPos === 0}
-                    onClick={() => handleMoveSlot(slotPos, -1)}
-                    aria-label={`${slotPos + 1}번 카드를 위로 이동`}
-                    className={`w-9 h-9 rounded-lg border-2 disabled:opacity-35 flex items-center justify-center cursor-pointer ${
-                      isLavender
-                        ? 'bg-[#F4F2FC] border-[#C9C2E8] text-[#4A467A] hover:border-[#6A52A3]'
-                        : 'bg-[#FFF9EF] border-[#EAE0D0] text-[#5C4D42] hover:border-[#9B785D]'
-                    }`}
-                  >
-                    <ArrowUp className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    disabled={slotPos === placedOrder.length - 1}
-                    onClick={() => handleMoveSlot(slotPos, 1)}
-                    aria-label={`${slotPos + 1}번 카드를 아래로 이동`}
-                    className={`w-9 h-9 rounded-lg border-2 disabled:opacity-35 flex items-center justify-center cursor-pointer ${
-                      isLavender
-                        ? 'bg-[#F4F2FC] border-[#C9C2E8] text-[#4A467A] hover:border-[#6A52A3]'
-                        : 'bg-[#FFF9EF] border-[#EAE0D0] text-[#5C4D42] hover:border-[#9B785D]'
-                    }`}
-                  >
-                    <ArrowDown className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveFromSlot(origIdx)}
-                    aria-label={`${slotPos + 1}번 순서 카드 취소`}
-                    title="선택 취소 (X)"
-                    className={`w-10 h-10 rounded-xl bg-white border-2 hover:bg-[#F39A83]/25 hover:border-[#D1684E] hover:text-[#7A2D1C] flex items-center justify-center cursor-pointer ${
-                      isLavender
-                        ? 'border-[#C6BEE8] text-[#4E4A7D]'
-                        : 'border-[#D4C3AE] text-[#5C4D42]'
-                    }`}
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-              )}
             </div>
           );
         })}
@@ -715,7 +717,7 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
 
       {/* Feedback Banner if checked and has errors */}
       {draft.flowOrderChecked && !isLockedSolved && wrongPositions.length > 0 && (
-        <div className="rounded-xl bg-[#FDECE7] border-2 border-[#C85B3F]/60 px-4 py-3.5 text-sm font-bold text-[#5E1F10]">
+        <div className="rounded-xl bg-[#FDECE7] border-2 border-[#C85B3F]/60 px-4 py-3.5 text-sm font-bold text-[#5E1F10] break-words [overflow-wrap:anywhere]">
           {wrongPositions.map((n) => `0${n}`).join(', ')}번 위치의 순서를 다시 확인해 보세요! X 버튼으로 빼서 다시 놓거나 위·아래 화살표로 바꿀 수 있어요.
         </div>
       )}
@@ -723,8 +725,8 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
       {/* Check or Completion */}
       {isLockedSolved ? (
         <div className="rounded-2xl bg-[#D7FFB8] border-2 border-[#58CC02] p-5 flex flex-wrap items-center justify-between gap-3">
-          <div className="text-sm sm:text-base font-extrabold text-[#1E4600] inline-flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-[#46A302]" />
+          <div className="text-sm sm:text-base font-extrabold text-[#1E4600] inline-flex items-center gap-2 min-w-0">
+            <CheckCircle2 className="w-5 h-5 text-[#46A302] shrink-0" />
             <span>글의 흐름 순서를 완벽히 파악했어요!</span>
           </div>
           <button
@@ -739,11 +741,11 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
       ) : (
         <>
           {/* Candidate Pool */}
-          <div className="space-y-3">
-            <div className={`text-base font-bold ${isLavender ? 'text-[#3F3D6B]' : 'text-[#5C4D42]'}`}>
+          <div className="space-y-3 min-w-0">
+            <div className={`text-sm sm:text-base font-bold ${isLavender ? 'text-[#3F3D6B]' : 'text-[#5C4D42]'}`}>
               아래 카드를 순서대로 눌러 위 칸을 채워보세요 (선택된 카드도 X로 취소 가능):
             </div>
-            <div className="grid grid-cols-1 gap-3">
+            <div className="grid grid-cols-1 gap-3 min-w-0">
               {shuffledOutline.map((card) => {
                 const placedPos = placedOrder.indexOf(card.originalIdx);
                 const isPlaced = placedPos !== -1;
@@ -752,7 +754,7 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
                     key={card.originalIdx}
                     draggable={!isPlaced}
                     onDragStart={() => setDraggedCardIdx(card.originalIdx)}
-                    className={`rounded-2xl border-2 transition-all flex items-center justify-between gap-3 p-4 sm:p-5 ${
+                    className={`rounded-2xl border-2 transition-all flex items-start justify-between gap-2.5 p-3.5 sm:p-4 min-w-0 ${
                       isPlaced
                         ? isLavender
                           ? 'bg-[#EAE3FA]/80 border-[#7963A8] text-[#1A1238]'
@@ -765,10 +767,10 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
                     <button
                       type="button"
                       onClick={() => handleToggleCandidateCard(card.originalIdx)}
-                      className="flex-1 text-left flex items-start gap-3.5 cursor-pointer"
+                      className="flex-1 min-w-0 text-left flex items-start gap-3 cursor-pointer"
                     >
                       <span
-                        className={`px-3 py-1 rounded-xl font-mono text-sm sm:text-base font-extrabold shrink-0 mt-0.5 ${
+                        className={`px-2.5 py-1 rounded-xl font-mono text-xs sm:text-sm font-extrabold shrink-0 mt-0.5 ${
                           isPlaced
                             ? isLavender
                               ? 'bg-[#6A52A3] text-white'
@@ -780,7 +782,7 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
                       >
                         {isPlaced ? `0${placedPos + 1} 배치됨` : '선택'}
                       </span>
-                      <span className="text-lg sm:text-xl font-bold leading-relaxed">
+                      <span className="flex-1 min-w-0 text-base sm:text-lg font-bold leading-relaxed break-words [overflow-wrap:anywhere]">
                         {card.text}
                       </span>
                     </button>
@@ -791,13 +793,13 @@ export const FlowBuilderPanel: React.FC<FlowBuilderPanelProps> = ({
                         onClick={() => handleRemoveFromSlot(card.originalIdx)}
                         aria-label={`0${placedPos + 1}번 배치 취소`}
                         title="선택 취소 (X)"
-                        className={`w-10 h-10 rounded-xl bg-white border-2 hover:bg-[#FFDFE0] hover:border-[#FF4B4B] hover:text-[#9A1B1B] flex items-center justify-center shrink-0 cursor-pointer ${
+                        className={`w-9 h-9 rounded-xl bg-white border-2 hover:bg-[#FFDFE0] hover:border-[#FF4B4B] hover:text-[#9A1B1B] flex items-center justify-center shrink-0 cursor-pointer ${
                           isLavender
                             ? 'border-[#C6BEE8] text-[#4E4A7D]'
                             : 'border-[#E5E5E5] text-[#5C4D42]'
                         }`}
                       >
-                        <X className="w-5 h-5" />
+                        <X className="w-4 h-4" />
                       </button>
                     )}
                   </div>
