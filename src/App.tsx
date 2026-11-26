@@ -50,6 +50,7 @@ import {
 } from './utils/soundEffects';
 import { AdventureMap } from './components/AdventureMap';
 import { DetectiveWorkspace } from './components/DetectiveWorkspace';
+import { DirectReadingView } from './components/DirectReadingView';
 import { CollectiblesView } from './components/CollectiblesView';
 import { LearningHistoryView } from './components/LearningHistoryView';
 import { ReviewMissionsView } from './components/ReviewMissionsView';
@@ -78,6 +79,7 @@ import mascotImage from './assets/images/mascot_fox_detective_1795522642644.jpg'
 type ActiveView =
   | 'map'
   | 'workspace'
+  | 'directReading'
   | 'collectibles'
   | 'reviewHistory'
   | 'teacher';
@@ -174,7 +176,7 @@ export default function App() {
   useEffect(() => {
     if (activeView === 'map') {
       AudioManager.setScene('map');
-    } else if (activeView === 'workspace') {
+    } else if (activeView === 'workspace' || activeView === 'directReading') {
       AudioManager.setScene('workspace');
     } else if (activeView === 'teacher') {
       AudioManager.setScene('none');
@@ -580,13 +582,35 @@ export default function App() {
     });
   };
 
-  const handleCompleteSentenceLab = () => {
+  const handleCompleteSentenceLab = (meta?: {
+    durationSec?: number;
+    chunkCount?: number;
+  }) => {
     playSuccessChime(gameState.profile.soundEnabled);
     const xpGain = 20;
+    const durationSec = meta?.durationSec;
+    const chunkCount = meta?.chunkCount;
     applyStateUpdate((prev) => {
       const existing =
         prev.progressById[currentQuestion.id] ??
         createEmptyProgress(currentQuestion.id);
+      const event: HistoryEvent = {
+        id: `lab-${currentQuestion.id}-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        questionId: currentQuestion.id,
+        sourceExam: currentQuestion.sourceExam,
+        sectionTitle: currentQuestion.sectionTitle,
+        examYear: currentQuestion.examYear,
+        isCorrect: true,
+        xpDelta: xpGain,
+        note:
+          durationSec !== undefined
+            ? `문장 해석 워크숍 완료 (${durationSec}초)`
+            : '문장 해석 워크숍 완료',
+        durationSec,
+        activityType: 'sentence_lab',
+        chunkCount,
+      };
       return {
         ...prev,
         profile: {
@@ -601,6 +625,7 @@ export default function App() {
             earnedXp: existing.earnedXp + xpGain,
           },
         },
+        history: [event, ...prev.history].slice(0, 120),
       };
     });
     setToastNotification({
@@ -609,9 +634,41 @@ export default function App() {
     });
   };
 
+  const handleRecordDirectReadingAttempt = (entry: {
+    question: ExtractedQuestion;
+    isCorrect: boolean;
+    durationSec: number;
+    chunkCount: number;
+    xpDelta: number;
+  }) => {
+    applyStateUpdate((prev) => {
+      const event: HistoryEvent = {
+        id: `dr-${entry.question.id}-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        questionId: entry.question.id,
+        sourceExam: entry.question.sourceExam,
+        sectionTitle: entry.question.sectionTitle,
+        examYear: entry.question.examYear,
+        isCorrect: entry.isCorrect,
+        xpDelta: entry.xpDelta,
+        note: entry.isCorrect
+          ? `직독직해 성공 (${entry.chunkCount}조각 · ${entry.durationSec}초)`
+          : `직독직해 재도전 (${entry.chunkCount}조각 · ${entry.durationSec}초)`,
+        durationSec: entry.durationSec,
+        activityType: 'direct_reading',
+        chunkCount: entry.chunkCount,
+      };
+      return {
+        ...prev,
+        history: [event, ...prev.history].slice(0, 120),
+      };
+    });
+  };
+
   const handleSubmitBossAnswer = (
     choiceIdx: number,
     cleanSolveThisSession: boolean,
+    durationSec?: number,
   ): {
     isCorrect: boolean;
     xpDelta: number;
@@ -685,6 +742,8 @@ export default function App() {
         note: isCorrect
           ? `${choiceIdx}번 정답 확인 (★${earnedStars}${perfectBonus ? ' · 원샷 퍼펙트' : ''})`
           : `${choiceIdx}번 선택 후 재도전`,
+        durationSec,
+        activityType: 'reading_quiz',
       };
 
       return {
@@ -1027,8 +1086,8 @@ export default function App() {
         />
       </div>
 
-      {/* Top Cozy Adventure HUD (Hidden during Focus Lesson Mode in Workspace) */}
-      {activeView !== 'workspace' && (
+      {/* Top Cozy Adventure HUD (Hidden during Focus Lesson Mode in Workspace & Direct Reading) */}
+      {activeView !== 'workspace' && activeView !== 'directReading' && (
         <header
           className={`sticky top-0 z-30 backdrop-blur-md border-b-2 px-4 lg:px-8 py-2.5 transition-colors duration-300 shadow-[0_3px_12px_rgba(45,38,32,0.04)] ${
             isLavenderTheme
@@ -1549,6 +1608,22 @@ export default function App() {
               setCollectiblesTab('quiz');
               navigateToStudentView('collectibles');
             }}
+            onOpenDirectReading={() => navigateToStudentView('directReading')}
+          />
+        )}
+
+        {activeView === 'directReading' && (
+          <DirectReadingView
+            questions={EXTRACTED_QUESTIONS}
+            initialExamYear={activeMapIsland}
+            nickname={gameState.profile.nickname}
+            totalXp={gameState.profile.xp}
+            currentStreak={gameState.profile.currentStreak}
+            soundEnabled={gameState.profile.soundEnabled}
+            reducedMotion={gameState.profile.reducedMotion}
+            onAwardXp={handleAwardQuizXp}
+            onRecordSentenceAttempt={handleRecordDirectReadingAttempt}
+            onBackToMap={() => navigateToStudentView('map')}
           />
         )}
 
@@ -1859,7 +1934,7 @@ export default function App() {
       )}
 
       {/* Bottom-Right Floating Toolkit (Font Expander 13pt~17pt + Quick Problem Search) */}
-      {activeView !== 'teacher' && (
+      {activeView !== 'teacher' && activeView !== 'directReading' && (
         <FloatingToolkit
           questions={EXTRACTED_QUESTIONS}
           progressById={gameState.progressById}
@@ -1878,11 +1953,12 @@ export default function App() {
               : undefined
           }
           onOpenTutorial={() => setTutorialOpen(true)}
+          onOpenDirectReading={() => navigateToStudentView('directReading')}
         />
       )}
 
-      {/* Clean 4-Item Student Bottom Dock (Hidden during Focus Lesson Mode in Workspace) */}
-      {activeView !== 'workspace' && (
+      {/* Clean 4-Item Student Bottom Dock (Hidden during Focus Lesson Mode in Workspace & Direct Reading) */}
+      {activeView !== 'workspace' && activeView !== 'directReading' && (
         <nav
           aria-label="학습 메뉴"
           className={`fixed bottom-0 inset-x-0 z-30 backdrop-blur-xs border-t-2 px-2.5 sm:px-3 py-2 transition-colors duration-300 ${

@@ -28,6 +28,7 @@ interface FloatingToolkitProps {
   onSelectQuestion: (questionId: string) => void;
   onOpenHintSheet?: () => void;
   onOpenTutorial?: () => void;
+  onOpenDirectReading?: () => void;
 }
 
 const FONT_SCALE_OPTIONS: { id: FontScaleMode; label: string; ptLabel: string }[] = [
@@ -48,6 +49,7 @@ export const FloatingToolkit: React.FC<FloatingToolkitProps> = ({
   onSelectQuestion,
   onOpenHintSheet,
   onOpenTutorial,
+  onOpenDirectReading,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
@@ -238,6 +240,20 @@ export const FloatingToolkit: React.FC<FloatingToolkitProps> = ({
                 >
                   <HelpCircle className="w-4 h-4 shrink-0" />
                   <span>푸는 법</span>
+                </button>
+              )}
+
+              {onOpenDirectReading && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onOpenDirectReading();
+                  }}
+                  className="col-span-2 min-h-[44px] px-3 py-2 rounded-xl bg-[#E8F7FF] border-2 border-[#1CB0F6] text-[#0D5B85] text-xs font-extrabold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <BookOpen className="w-4 h-4 shrink-0" />
+                  <span>직독직해 모드 바로가기</span>
                 </button>
               )}
 

@@ -75,6 +75,9 @@ export interface HistoryEvent {
   isCorrect: boolean;
   xpDelta: number;
   note: string;
+  durationSec?: number;
+  activityType?: 'reading_quiz' | 'direct_reading' | 'sentence_lab' | 'boss_challenge';
+  chunkCount?: number;
 }
 
 export interface BadgeDef {

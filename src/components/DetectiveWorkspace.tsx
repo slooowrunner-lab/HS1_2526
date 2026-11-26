@@ -82,10 +82,14 @@ interface DetectiveWorkspaceProps {
   onRecordGuess: (guessIdx: number, isReal?: boolean) => void;
   onCollectClue: (clueKey: string) => void;
   onCompleteStoryBuild: () => void;
-  onCompleteSentenceLab?: () => void;
+  onCompleteSentenceLab?: (meta?: {
+    durationSec?: number;
+    chunkCount?: number;
+  }) => void;
   onSubmitBossAnswer: (
     choiceIdx: number,
     cleanSolveThisSession: boolean,
+    durationSec?: number,
   ) => {
     isCorrect: boolean;
     xpDelta: number;
@@ -248,6 +252,8 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
   );
   const [timerActive, setTimerActive] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(90);
+  const attemptStartedAtRef = useRef<number>(Date.now());
+  const sentenceLabStartedAtRef = useRef<number>(Date.now());
 
   // Discovery XP 500ms smooth count-up
   const [displayXpCount, setDisplayXpCount] = useState(progress.earnedXp);
@@ -716,7 +722,18 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
     if (selectedBossChoice === null) return;
     setTimerActive(false);
     const cleanSolveThisSession = !hadWrongThisVisit;
-    const res = onSubmitBossAnswer(selectedBossChoice, cleanSolveThisSession);
+    const elapsedSec = timerActive
+      ? Math.max(3, 90 - secondsLeft)
+      : Math.max(
+          3,
+          Math.min(600, Math.round((Date.now() - attemptStartedAtRef.current) / 1000)),
+        );
+    const res = onSubmitBossAnswer(
+      selectedBossChoice,
+      cleanSolveThisSession,
+      elapsedSec,
+    );
+    attemptStartedAtRef.current = Date.now();
     if (!res.isCorrect) {
       setHadWrongThisVisit(true);
     } else {
@@ -2009,7 +2026,18 @@ export const DetectiveWorkspace: React.FC<DetectiveWorkspaceProps> = ({
                           sentenceXpClaimed: true,
                           sentenceCompleted: true,
                         }));
-                        onCompleteSentenceLab?.();
+                        const elapsedLabSec = Math.max(
+                          3,
+                          Math.min(
+                            600,
+                            Math.round((Date.now() - sentenceLabStartedAtRef.current) / 1000),
+                          ),
+                        );
+                        onCompleteSentenceLab?.({
+                          durationSec: elapsedLabSec,
+                          chunkCount: currentSentenceAnalysis.chunks.length,
+                        });
+                        sentenceLabStartedAtRef.current = Date.now();
                       }}
                     />
                   )}

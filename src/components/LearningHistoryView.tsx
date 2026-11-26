@@ -18,6 +18,7 @@ import {
   downloadTextFile,
   parseQuestBackupJson,
 } from '../utils/exporters';
+import { InterpretationAnalyticsDashboard } from './InterpretationAnalyticsDashboard';
 
 interface LearningHistoryViewProps {
   questions: ExtractedQuestion[];
@@ -168,6 +169,15 @@ export const LearningHistoryView: React.FC<LearningHistoryViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Sentence Interpretation Skill Score + Weekly Accuracy & Speed Dashboard */}
+      <InterpretationAnalyticsDashboard
+        history={history}
+        progressById={progressById}
+        totalQuestions={questions.length}
+        streakCount={streakCount}
+        reducedMotion={gameState.profile.reducedMotion}
+      />
 
       {/* Section Mastery Grid */}
       <section className="clay-card rounded-3xl p-5 sm:p-6 space-y-4">
@@ -333,6 +343,11 @@ export const LearningHistoryView: React.FC<LearningHistoryViewProps> = ({
                 </div>
 
                 <div className="flex items-center gap-3 text-xs font-mono shrink-0 tabular-nums">
+                  {typeof ev.durationSec === 'number' && ev.durationSec > 0 && (
+                    <span className="font-bold text-[#B25E00]">
+                      {ev.durationSec}초
+                    </span>
+                  )}
                   {ev.xpDelta > 0 && (
                     <span className="font-extrabold text-[#4C7A34]">
                       +{ev.xpDelta} XP

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  BookOpen,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -72,6 +73,7 @@ interface AdventureMapProps {
   lastActiveQuestionId: string | null;
   onIslandChange?: (island: ExamYear) => void;
   onOpenVocabQuiz?: () => void;
+  onOpenDirectReading?: () => void;
 }
 
 const ZONE_FLAVOR: Record<
@@ -139,6 +141,7 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
   lastActiveQuestionId,
   onIslandChange,
   onOpenVocabQuiz,
+  onOpenDirectReading,
 }) => {
   const [selectedIsland, setSelectedIsland] = useState<ExamYear>(() => {
     if (lastActiveQuestionId) {
@@ -731,20 +734,37 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
               </span>
             </div>
 
-            {onOpenVocabQuiz && (
-              <button
-                type="button"
-                onClick={onOpenVocabQuiz}
-                className={`dq-btn-3d min-h-[40px] px-3.5 py-1.5 rounded-xl border-2 text-xs sm:text-sm font-extrabold inline-flex items-center gap-1.5 cursor-pointer ${
-                  isLavender
-                    ? 'bg-[#EAE3FA] border-[#6A52A3] text-[#211442] hover:bg-[#DFD6FA]'
-                    : 'bg-[#FFF6DA] border-[#D4A72C] text-[#4B3200] hover:bg-[#FFE18A]'
-                }`}
-              >
-                <Zap className="w-4 h-4 text-[#FF9600]" />
-                <span>어휘 퀴즈</span>
-              </button>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {onOpenDirectReading && (
+                <button
+                  type="button"
+                  onClick={onOpenDirectReading}
+                  className={`dq-btn-3d min-h-[40px] px-3.5 py-1.5 rounded-xl border-2 text-xs sm:text-sm font-extrabold inline-flex items-center gap-1.5 cursor-pointer ${
+                    isLavender
+                      ? 'bg-[#D7FFB8] border-[#46A302] text-[#1E4600] hover:bg-[#C7F9A0]'
+                      : 'bg-[#EEFFD9] border-[#58CC02] text-[#1E4600] hover:bg-[#D7FFB8]'
+                  }`}
+                >
+                  <BookOpen className="w-4 h-4 text-[#46A302]" />
+                  <span>직독직해 연습</span>
+                </button>
+              )}
+
+              {onOpenVocabQuiz && (
+                <button
+                  type="button"
+                  onClick={onOpenVocabQuiz}
+                  className={`dq-btn-3d min-h-[40px] px-3.5 py-1.5 rounded-xl border-2 text-xs sm:text-sm font-extrabold inline-flex items-center gap-1.5 cursor-pointer ${
+                    isLavender
+                      ? 'bg-[#EAE3FA] border-[#6A52A3] text-[#211442] hover:bg-[#DFD6FA]'
+                      : 'bg-[#FFF6DA] border-[#D4A72C] text-[#4B3200] hover:bg-[#FFE18A]'
+                  }`}
+                >
+                  <Zap className="w-4 h-4 text-[#FF9600]" />
+                  <span>어휘 퀴즈</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
