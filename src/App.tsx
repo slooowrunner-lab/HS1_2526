@@ -1052,7 +1052,8 @@ export default function App() {
 
   const isLavenderTheme =
     (activeView === 'workspace' && currentQuestion.examYear === '2026') ||
-    (activeView === 'map' && activeMapIsland === '2026');
+    ((activeView === 'map' || activeView === 'directReading') &&
+      activeMapIsland === '2026');
 
   return (
     <div
@@ -1565,7 +1566,7 @@ export default function App() {
         }`}
       >
         <div
-          key={activeView === 'map' ? `map-${activeMapIsland}` : activeView}
+          key={activeView}
           className={!gameState.profile.reducedMotion ? 'rq-view-enter' : ''}
         >
         {activeView === 'map' && (
@@ -1603,6 +1604,7 @@ export default function App() {
             onStartZoneBoss={handleStartZoneBoss}
             onCollectMapObject={handleCollectMapObject}
             lastActiveQuestionId={gameState.profile.lastActiveQuestionId}
+            activeIsland={activeMapIsland}
             onIslandChange={setActiveMapIsland}
             onOpenVocabQuiz={() => {
               setCollectiblesTab('quiz');
@@ -1899,6 +1901,7 @@ export default function App() {
       {setupModalOpen && gameState.profile.onboarded && (
         <WelcomeOnboardingModal
           initialNickname={gameState.profile.nickname}
+          initialPreferredYear={activeMapIsland}
           mode="setup"
           initialStep={1}
           onClose={() => setSetupModalOpen(false)}

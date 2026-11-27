@@ -21,6 +21,7 @@ import mascotImage from '../assets/images/mascot_fox_detective_1795522642644.jpg
 
 interface WelcomeOnboardingModalProps {
   initialNickname: string;
+  initialPreferredYear?: ExamYear;
   initialStep?: 1 | 2;
   mode?: 'onboarding' | 'tutorial' | 'setup';
   onClose?: () => void;
@@ -46,6 +47,7 @@ const DEMO_OPTIONS = [
 
 export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
   initialNickname,
+  initialPreferredYear = '2025',
   initialStep = 1,
   mode = 'onboarding',
   onClose,
@@ -57,7 +59,7 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
       ? ''
       : initialNickname,
   );
-  const [preferredYear, setPreferredYear] = useState<ExamYear>('2025');
+  const [preferredYear, setPreferredYear] = useState<ExamYear>(initialPreferredYear);
   const [dailyGoal, setDailyGoal] = useState<number>(3);
   const [demoPick, setDemoPick] = useState<string | null>(null);
   const [demoChecked, setDemoChecked] = useState(false);
@@ -66,6 +68,10 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
   useEffect(() => {
     setStep(initialStep);
   }, [initialStep]);
+
+  useEffect(() => {
+    setPreferredYear(initialPreferredYear);
+  }, [initialPreferredYear]);
 
   // StrictMode-safe directional page-turn tracking across steps 1..2
   const lastStepRef = useRef<{ step: 1 | 2; dir: 'next' | 'prev' | 'none' }>({

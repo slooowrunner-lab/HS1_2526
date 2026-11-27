@@ -71,6 +71,7 @@ interface AdventureMapProps {
   ) => void;
   onCollectMapObject: (obj: MapInteractiveObject) => void;
   lastActiveQuestionId: string | null;
+  activeIsland?: ExamYear;
   onIslandChange?: (island: ExamYear) => void;
   onOpenVocabQuiz?: () => void;
   onOpenDirectReading?: () => void;
@@ -139,17 +140,20 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
   onStartZoneBoss,
   onCollectMapObject,
   lastActiveQuestionId,
+  activeIsland,
   onIslandChange,
   onOpenVocabQuiz,
   onOpenDirectReading,
 }) => {
-  const [selectedIsland, setSelectedIsland] = useState<ExamYear>(() => {
+  const [internalIsland, setInternalIsland] = useState<ExamYear>(() => {
+    if (activeIsland) return activeIsland;
     if (lastActiveQuestionId) {
       const found = questions.find((q) => q.id === lastActiveQuestionId);
       if (found) return found.examYear;
     }
     return '2025';
   });
+  const selectedIsland = activeIsland ?? internalIsland;
   const [searchQuery, setSearchQuery] = useState('');
   const [onlyThreePts, setOnlyThreePts] = useState(false);
   const [lockedNoticeId, setLockedNoticeId] = useState<string | null>(null);
@@ -159,9 +163,11 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
   const [charBubbleOpen, setCharBubbleOpen] = useState(false);
   const [collapsedZones, setCollapsedZones] = useState<Record<number, boolean>>(() => {
     const initialYr: ExamYear =
+      activeIsland ??
       (lastActiveQuestionId
         ? questions.find((q) => q.id === lastActiveQuestionId)?.examYear
-        : undefined) ?? '2025';
+        : undefined) ??
+      '2025';
     const initialTarget =
       (lastActiveQuestionId
         ? questions.find(
@@ -183,12 +189,9 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
   const [scrollToActiveNonce, setScrollToActiveNonce] = useState(0);
 
   const activeNodeRef = useRef<HTMLDivElement | null>(null);
+  const prevIslandRef = useRef<ExamYear>(selectedIsland);
   const isLavender = selectedIsland === '2026';
   const islandTheme = isLavender ? 'lavender' : 'spring';
-
-  useEffect(() => {
-    onIslandChange?.(selectedIsland);
-  }, [selectedIsland, onIslandChange]);
 
   const islandStats = useMemo(() => {
     const calc = (yr: ExamYear) => {
@@ -401,7 +404,8 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
 
   const handleSelectIsland = (yr: ExamYear) => {
     const target = getTargetQuestionForIsland(yr);
-    setSelectedIsland(yr);
+    setInternalIsland(yr);
+    onIslandChange?.(yr);
     setLockedNoticeId(null);
     setCharBubbleOpen(false);
     if (target) {
@@ -419,6 +423,21 @@ export const AdventureMap: React.FC<AdventureMapProps> = ({
     }
     setScrollToActiveNonce((n) => n + 1);
   };
+
+  useEffect(() => {
+    if (prevIslandRef.current === selectedIsland) return;
+    prevIslandRef.current = selectedIsland;
+    const target = getTargetQuestionForIsland(selectedIsland);
+    setLockedNoticeId(null);
+    setCharBubbleOpen(false);
+    if (target) {
+      const nextCollapsed: Record<number, boolean> = {};
+      SECTION_META.forEach((sec) => {
+        nextCollapsed[sec.number] = sec.number !== target.sectionNumber;
+      });
+      setCollapsedZones(nextCollapsed);
+    }
+  }, [selectedIsland, getTargetQuestionForIsland]);
 
   const handleJumpToActive = () => {
     const target = activeNodeOnSelectedIsland;
